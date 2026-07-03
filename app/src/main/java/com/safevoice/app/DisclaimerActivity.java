@@ -9,12 +9,13 @@ import android.view.View;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.safevoice.app.databinding.ActivityDisclaimerBinding;
+import com.safevoice.app.utils.EncryptionHelper;
 
 /**
  * This is the first screen the user sees.
  * It forces the user to accept the terms of service before using the app.
  * The user's acceptance is stored in SharedPreferences. If already accepted,
- * this activity immediately forwards the user to MainActivity.
+ * this activity immediately forwards the user to the correct onboarding state or MainActivity.
  */
 public class DisclaimerActivity extends AppCompatActivity {
 
@@ -32,8 +33,8 @@ public class DisclaimerActivity extends AppCompatActivity {
         boolean hasAccepted = prefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false);
 
         if (hasAccepted) {
-            // If accepted, skip this screen and go directly to the main app.
-            navigateToMainActivity();
+            // If accepted, evaluate onboarding setup states first
+            navigateToNextScreen();
             return; // Important to return here to stop further execution of onCreate.
         }
 
@@ -50,8 +51,8 @@ public class DisclaimerActivity extends AppCompatActivity {
                 editor.putBoolean(KEY_DISCLAIMER_ACCEPTED, true);
                 editor.apply();
 
-                // Then, proceed to the main app.
-                navigateToMainActivity();
+                // Proceed to onboarding flow
+                navigateToNextScreen();
             }
         });
 
@@ -66,12 +67,27 @@ public class DisclaimerActivity extends AppCompatActivity {
     }
 
     /**
-     * A helper method to create an Intent for MainActivity, start it,
-     * and finish the current DisclaimerActivity so the user cannot navigate back to it.
+     * Evaluates the local user session to route them securely.
+     * Routes users to role selection, circle setup, or the main application hub.
      */
-    private void navigateToMainActivity() {
-        Intent intent = new Intent(DisclaimerActivity.this, MainActivity.class);
-        startActivity(intent);
+    private void navigateToNextScreen() {
+        EncryptionHelper encryptionHelper = EncryptionHelper.getInstance(this);
+        String userRole = encryptionHelper.getUserRole();
+        boolean isSetupDone = encryptionHelper.isSetupDone();
+
+        if (userRole == null) {
+            // No role selected yet -> Redirect to role selection onboarding
+            Intent intent = new Intent(DisclaimerActivity.this, RoleSelectionActivity.class);
+            startActivity(intent);
+        } else if (!isSetupDone) {
+            // Role is selected but dynamic database configuration is pending
+            Intent intent = new Intent(DisclaimerActivity.this, CircleSetupActivity.class);
+            startActivity(intent);
+        } else {
+            // Setup is complete -> Direct user safely to MainActivity
+            Intent intent = new Intent(DisclaimerActivity.this, MainActivity.class);
+            startActivity(intent);
+        }
         finish();
     }
 }
