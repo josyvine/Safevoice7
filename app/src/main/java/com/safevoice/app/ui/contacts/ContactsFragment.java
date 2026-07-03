@@ -23,6 +23,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.CollectionReference;
@@ -47,6 +48,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Fragment containing interfaces to search and add secondary safety circle members.
+ * Overhauled to direct all lookup and collection actions to the custom named database.
+ */
 public class ContactsFragment extends Fragment implements ContactsAdapter.OnContactOptionsClickListener, ConnectionRequestAdapter.OnRequestInteractionListener {
 
     private static final String TAG = "ContactsFragment";
@@ -74,7 +79,13 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        db = FirebaseFirestore.getInstance();
+        // Retrieve Firestore connected directly to your secondary custom Firebase project
+        try {
+            db = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+        } catch (IllegalStateException e) {
+            db = FirebaseFirestore.getInstance();
+        }
+
         mAuth = FirebaseAuth.getInstance();
         contactsManager = ContactsManager.getInstance(requireContext());
 
@@ -213,7 +224,6 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
         dialog.show();
     }
 
-    // --- THIS IS THE CORRECTED METHOD WITH THE ERROR POP-UP ---
     private void searchUserByEmail(String email, final AlertDialog searchDialog) {
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser == null || email.equalsIgnoreCase(currentUser.getEmail())) {
@@ -231,18 +241,15 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                             String recipientName = userDoc.getString("verifiedName");
                             confirmAndSendRequest(recipientUid, recipientName, searchDialog);
                         } else {
-                            // --- NEW LOGIC TO CATCH THE ERROR AND SHOW A POP-UP ---
                             Exception e = task.getException();
                             if (e instanceof FirebaseFirestoreException && ((FirebaseFirestoreException) e).getCode() == FirebaseFirestoreException.Code.FAILED_PRECONDITION) {
-                                // This is the specific error for a missing index.
                                 String errorMessage = e.getMessage();
                                 new AlertDialog.Builder(requireContext())
                                         .setTitle("Firebase Index Required")
-                                        .setMessage(errorMessage) // This will contain the URL
+                                        .setMessage(errorMessage)
                                         .setPositiveButton("OK", null)
                                         .show();
                             } else {
-                                // For all other errors, including a legitimate "user not found"
                                 Toast.makeText(getContext(), R.string.user_not_found, Toast.LENGTH_SHORT).show();
                                 Log.w(TAG, "Search failed", e);
                             }
