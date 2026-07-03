@@ -38,6 +38,7 @@ import java.security.GeneralSecurityException;
 /**
  * The fragment for the "Settings" screen.
  * It allows the user to manage Firebase configuration and other app preferences.
+ * Integrates copyable security rules and encrypted Twilio credentials.
  */
 public class SettingsFragment extends Fragment {
 
@@ -92,14 +93,12 @@ public class SettingsFragment extends Fragment {
             }
         });
 
+        // Show copyable security rules via our custom dialog
         binding.buttonShowRules.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (binding.cardRulesHelper.getVisibility() == View.GONE) {
-                    binding.cardRulesHelper.setVisibility(View.VISIBLE);
-                } else {
-                    binding.cardRulesHelper.setVisibility(View.GONE);
-                }
+                FirestoreRulesDialog dialog = new FirestoreRulesDialog();
+                dialog.show(getChildFragmentManager(), "FirestoreRulesDialog");
             }
         });
 
