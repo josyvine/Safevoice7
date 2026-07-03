@@ -10,12 +10,11 @@
 
     <!-- App Logo Fallback Header -->
     <ImageView
+        android:id="@android:id/icon"
         android:layout_width="96dp"
-        // Google standard launcher icon reference
-        android.id="@android:id/icon"
         android:layout_height="96dp"
-        android.layout_marginTop="60dp"
-        android.src="@mipmap/ic_launcher"
+        android:layout_marginTop="60dp"
+        android:src="@mipmap/ic_launcher"
         android:contentDescription="Safe Voice Logo" />
 
     <TextView
