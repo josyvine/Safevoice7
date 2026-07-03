@@ -62,10 +62,7 @@
             android:padding="16dp"
             android:visibility="invisible"
             android:contentDescription="Setup QR Code" />
-    </GridCardView>
-    </com.google.android.material.card.MaterialCardView> -->
-    <!-- Custom card containers fallback for older platforms -->
-    </LinearLayout>
+    </androidx.cardview.widget.CardView>
 
     <!-- Description Note -->
     <TextView
