@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_horizontal"
+    android:background="#FFFFFF">
+
+    <!-- App Logo Fallback Header -->
+    <ImageView
+        android:layout_width="96dp"
+        // Google standard launcher icon reference
+        android.id="@android:id/icon"
+        android:layout_height="96dp"
+        android.layout_marginTop="60dp"
+        android.src="@mipmap/ic_launcher"
+        android:contentDescription="Safe Voice Logo" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Welcome to Safe Voice"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:textColor="#212121"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Choose your role to configure your dynamic private safety network."
+        android:textSize="14sp"
+        android:textColor="#757575"
+        android:gravity="center"
+        android:layout_marginBottom="48dp" />
+
+    <!-- Circle Creator Action Button -->
+    <Button
+        android:id="@+id/btnRoleCreator"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:text="Create a Private Circle\n(For Family Head / Circle Owner)"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="false"
+        android:layout_marginBottom="20dp" />
+
+    <!-- Circle Member Action Button -->
+    <Button
+        android:id="@+id/btnRoleMember"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:text="Join an Existing Circle\n(For Family Member / Circle Friend)"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textAllCaps="false" />
+
+</LinearLayout>
