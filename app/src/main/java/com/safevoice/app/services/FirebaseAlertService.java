@@ -16,6 +16,10 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import com.safevoice.app.EmergencyPopupActivity;
@@ -23,6 +27,11 @@ import com.safevoice.app.R;
 
 import java.util.Map;
 
+/**
+ * Handles incoming Firebase Cloud Messages (FCM) on-demand.
+ * Listens for high-priority custom payloads, activates the device wake locks,
+ * plays standard alarm siren tones, and displays the full-screen emergency overlay.
+ */
 public class FirebaseAlertService extends FirebaseMessagingService {
 
     private static final String TAG = "FirebaseAlertService";
@@ -50,7 +59,22 @@ public class FirebaseAlertService extends FirebaseMessagingService {
     public void onNewToken(@NonNull String token) {
         super.onNewToken(token);
         Log.d(TAG, "Refreshed FCM token: " + token);
-        // Here you would send the token to your server to associate it with the user
+
+        // Upload the new token to the user's dynamic custom profile in the secondary database
+        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        if (currentUser != null) {
+            try {
+                FirebaseApp circleApp = FirebaseApp.getInstance("safe_voice_circle");
+                FirebaseFirestore.getInstance(circleApp)
+                        .collection("users")
+                        .document(currentUser.getUid())
+                        .update("fcmToken", token)
+                        .addOnSuccessListener(aVoid -> Log.d(TAG, "FCM Token successfully synchronized on safe_voice_circle."))
+                        .addOnFailureListener(e -> Log.e(TAG, "Failed to synchronize FCM Token on safe_voice_circle.", e));
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Dynamic safe_voice_circle database not initialized yet.", e);
+            }
+        }
     }
 
     private void handleEmergencyAlert(Map<String, String> data) {
@@ -121,8 +145,6 @@ public class FirebaseAlertService extends FirebaseMessagingService {
 
         notificationManager.notify(1, notificationBuilder.build());
     }
-
-
 
     private void playAlarmSound() {
         try {
