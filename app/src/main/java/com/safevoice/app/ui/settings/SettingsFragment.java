@@ -30,6 +30,7 @@ import androidx.security.crypto.MasterKeys;
 import com.safevoice.app.R;
 import com.safevoice.app.databinding.FragmentSettingsBinding;
 import com.safevoice.app.firebase.FirebaseManager;
+import com.safevoice.app.utils.EncryptionHelper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -67,6 +68,7 @@ public class SettingsFragment extends Fragment {
         initializeLaunchers();
         setupClickListeners();
         loadSettings();
+        setupCreatorQrFeature();
     }
 
     private void initializeLaunchers() {
@@ -128,6 +130,25 @@ public class SettingsFragment extends Fragment {
                 saveTwilioCredentials();
             }
         });
+    }
+
+    private void setupCreatorQrFeature() {
+        String userRole = EncryptionHelper.getInstance(requireContext()).getUserRole();
+        
+        // Show the generated dynamic invite QR code ONLY if the user is a Circle Creator
+        if ("creator".equals(userRole)) {
+            binding.buttonShowQr.setVisibility(View.VISIBLE);
+            binding.buttonShowQr.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    CircleQrGeneratorDialog dialog = new CircleQrGeneratorDialog();
+                    dialog.show(getChildFragmentManager(), "CircleQrGeneratorDialog");
+                }
+            });
+        } else {
+            // Hide for simple family members
+            binding.buttonShowQr.setVisibility(View.GONE);
+        }
     }
 
     private void loadSettings() {
