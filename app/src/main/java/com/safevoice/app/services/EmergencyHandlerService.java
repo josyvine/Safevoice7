@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat;
 
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentSnapshot;
@@ -35,6 +36,12 @@ import com.safevoice.app.webrtc.WebRTCManager;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Service that handles the emergency sequence when triggered.
+ * Resolves high-accuracy GPS coordinates and dispatches automated emergency alerts.
+ * SMS warning layouts are dispatched first, and then online FCM signalling routes are triggered
+ * over the custom "safe_voice_circle" database structure.
+ */
 public class EmergencyHandlerService extends Service implements WebRTCManager.WebRTCListener {
 
     private static final String TAG = "EmergencyHandlerService";
@@ -74,25 +81,23 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         return START_NOT_STICKY;
     }
 
-    // --- THIS IS THE CORRECTED METHOD ---
     private void executeEmergencyActions(Location location) {
         ContactsManager contactsManager = ContactsManager.getInstance(this);
         Contact primaryContact = contactsManager.getPrimaryContact();
         List<Contact> priorityContacts = contactsManager.getPriorityContacts();
 
-        // --- FIX 1: SEND SMS TO THE PRIMARY CONTACT ---
-        // This ensures the primary contact ALWAYS gets an SMS.
+        // Send SMS to the primary contact
         if (primaryContact != null && primaryContact.getPhoneNumber() != null && !primaryContact.getPhoneNumber().isEmpty()) {
             sendSmsAlert(primaryContact.getPhoneNumber(), location);
         } else {
             Log.w(TAG, "No primary contact with a phone number set. Cannot send primary SMS.");
         }
 
-        // --- FIX 2: ALSO SEND SMS TO ALL OTHER PRIORITY CONTACTS ---
+        // Send SMS to all other priority contacts
         if (priorityContacts != null && !priorityContacts.isEmpty()) {
             for (Contact contact : priorityContacts) {
                 if (contact.getPhoneNumber() != null && !contact.getPhoneNumber().isEmpty()) {
-                    // This check prevents sending a duplicate SMS if the primary contact is also a priority contact
+                    // Prevent duplicate SMS if the primary contact is also in priority list
                     if (primaryContact == null || !contact.equals(primaryContact)) {
                         sendSmsAlert(contact.getPhoneNumber(), location);
                     }
@@ -105,10 +110,10 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         if (isOnline()) {
             Log.d(TAG, "Device is ONLINE. Executing advanced plan.");
 
-            // The SMS alerts are already sent. Now, send the in-app FCM alerts.
+            // Send in-app FCM alerts to priority contacts
             sendFcmAlertsToAll(priorityContacts, location);
 
-            // Smart Calling
+            // Smart Calling configuration check
             SharedPreferences settingsPrefs = getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE);
             String callPreference = settingsPrefs.getString(KEY_CALL_PREFERENCE, "standard");
 
@@ -122,7 +127,6 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             }
         } else {
             Log.d(TAG, "Device is OFFLINE. Executing fallback plan.");
-            // The SMS alerts are already sent. Now just make the standard call.
             makeStandardPhoneCall(primaryContact);
             stopSelf();
         }
@@ -144,7 +148,10 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
         if (currentUser == null) return;
 
-        FirebaseFirestore.getInstance().collection("users").document(currentUser.getUid()).get()
+        // Retrieve Firestore connected to your custom "safe_voice_circle" named app instance
+        FirebaseFirestore dynamicDb = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+
+        dynamicDb.collection("users").document(currentUser.getUid()).get()
             .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
                 @Override
                 public void onComplete(@NonNull Task<DocumentSnapshot> task) {
@@ -154,7 +161,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
 
                         for (Contact contact : contacts) {
                             if (contact.getUid() != null) {
-                                sendFcmMessage(contact.getUid(), callerName, currentUser.getUid(), location);
+                                sendFcmMessage(contact.getUid(), callerName, currentUser.getUid(), location, dynamicDb);
                             }
                         }
                     }
@@ -162,8 +169,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             });
     }
 
-    private void sendFcmMessage(String recipientUid, String callerName, String callerUid, Location location) {
-        FirebaseFirestore.getInstance().collection("users").document(recipientUid).get()
+    private void sendFcmMessage(String recipientUid, String callerName, String callerUid, Location location, FirebaseFirestore dynamicDb) {
+        dynamicDb.collection("users").document(recipientUid).get()
             .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
                 @Override
                 public void onComplete(@NonNull Task<DocumentSnapshot> task) {
