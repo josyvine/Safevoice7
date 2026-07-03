@@ -8,13 +8,13 @@
     android:gravity="center_horizontal"
     android:background="#FFFFFF">
 
-    <!-- App Logo Fallback Header -->
+    <!-- App Logo Header -->
     <ImageView
         android:id="@android:id/icon"
         android:layout_width="96dp"
         android:layout_height="96dp"
         android:layout_marginTop="60dp"
-        android:src="@mipmap/ic_launcher"
+        android:src="@drawable/safevoice"
         android:contentDescription="Safe Voice Logo" />
 
     <TextView
