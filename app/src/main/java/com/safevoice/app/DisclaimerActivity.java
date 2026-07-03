@@ -68,7 +68,7 @@ public class DisclaimerActivity extends AppCompatActivity {
 
     /**
      * Evaluates the local user session to route them securely.
-     * Routes users to role selection, circle setup, or the main application hub.
+     * Routes users to role selection, appropriate setup page, or the main application hub.
      */
     private void navigateToNextScreen() {
         EncryptionHelper encryptionHelper = EncryptionHelper.getInstance(this);
@@ -81,7 +81,14 @@ public class DisclaimerActivity extends AppCompatActivity {
             startActivity(intent);
         } else if (!isSetupDone) {
             // Role is selected but dynamic database configuration is pending
-            Intent intent = new Intent(DisclaimerActivity.this, CircleSetupActivity.class);
+            Intent intent;
+            if ("creator".equals(userRole)) {
+                // Creators set up their custom private dynamic Firebase DB by uploading JSON
+                intent = new Intent(DisclaimerActivity.this, CircleSetupActivity.class);
+            } else {
+                // Members bypass JSON setup entirely and scan the Creator's setup QR code
+                intent = new Intent(DisclaimerActivity.this, CircleJoinQrScanActivity.class);
+            }
             startActivity(intent);
         } else {
             // Setup is complete -> Direct user safely to MainActivity
