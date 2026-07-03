@@ -51,7 +51,15 @@ public class MainActivity extends AppCompatActivity {
 
         // 1. Verify that the dynamic safety circle configuration is complete
         if (!EncryptionHelper.getInstance(this).isSetupDone()) {
-            Intent intent = new Intent(this, CircleSetupActivity.class);
+            String userRole = EncryptionHelper.getInstance(this).getUserRole();
+            Intent intent;
+            if ("creator".equals(userRole)) {
+                // Circle Creators are routed back to the JSON file-upload interface
+                intent = new Intent(this, CircleSetupActivity.class);
+            } else {
+                // Circle Members are routed back to the setup QR code scanner interface
+                intent = new Intent(this, CircleJoinQrScanActivity.class);
+            }
             startActivity(intent);
             finish();
             return;
