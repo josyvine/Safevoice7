@@ -24,6 +24,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Manages the lifetime of a WebRTC PeerConnection session.
+ * Handles local audio acquisition and interfaces with the signaling client.
+ */
 public class WebRTCManager implements FirebaseSignalingClient.SignalingListener {
 
     private static final String TAG = "WebRTCManager";
