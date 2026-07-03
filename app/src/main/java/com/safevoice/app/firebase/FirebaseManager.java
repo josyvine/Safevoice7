@@ -5,10 +5,13 @@ import android.util.Log;
 
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
+import com.safevoice.app.utils.CentralConfig;
+import com.safevoice.app.utils.EncryptionHelper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -19,8 +22,11 @@ import java.nio.charset.StandardCharsets;
 
 /**
  * Manages the dynamic initialization of the Firebase backend.
- * This class allows the app to switch its Firebase project at runtime
- * by loading a user-provided google-services.json file.
+ * This class allows the app to switch its Firebase project at runtime.
+ *
+ * Programmatic Dual-App Design:
+ * - [DEFAULT] App: Initialized permanently with developer credentials for global Gmail logins.
+ * - "safe_voice_circle" App: Mounted dynamically to handle isolated, user-hosted database files.
  */
 public class FirebaseManager {
 
@@ -29,51 +35,126 @@ public class FirebaseManager {
 
     /**
      * Initializes Firebase for the entire application.
-     * It first checks for a user-provided configuration file in the app's private storage.
-     * If found, it initializes Firebase using that configuration.
-     * If not found, it falls back to the default google-services.json bundled with the APK.
+     * Mounts the global Auth app first, and then initializes the custom secondary circle app if configured.
      *
      * @param context The application context.
      */
     public static void initialize(Context context) {
-        if (FirebaseApp.getApps(context).isEmpty()) {
-            File userConfigFile = new File(context.getFilesDir(), USER_CONFIG_FILENAME);
+        // 1. Programmatically initialize the Central developer auth project as the [DEFAULT] instance
+        try {
+            FirebaseOptions defaultOptions = new FirebaseOptions.Builder()
+                    .setApiKey(CentralConfig.API_KEY)
+                    .setApplicationId(CentralConfig.APPLICATION_ID)
+                    .setProjectId(CentralConfig.PROJECT_ID)
+                    .setStorageBucket(CentralConfig.STORAGE_BUCKET)
+                    .build();
 
-            if (userConfigFile.exists()) {
-                Log.d(TAG, "User-provided Firebase config found. Initializing...");
-                try {
-                    // --- THIS IS THE FIX ---
-                    // The fromStream() method is deprecated. We now manually parse the JSON
-                    // and use the FirebaseOptions.Builder to create the configuration.
-                    FirebaseOptions options = buildOptionsFromJson(new FileInputStream(userConfigFile));
-                    FirebaseApp.initializeApp(context, options);
-                    Log.d(TAG, "Firebase initialized successfully with USER config.");
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to read or parse user-provided Firebase config. Falling back to default.", e);
-                    initializeAppWithDefault(context);
+            boolean defaultAppExists = false;
+            for (FirebaseApp app : FirebaseApp.getApps(context)) {
+                if (FirebaseApp.DEFAULT_APP_NAME.equals(app.getName())) {
+                    defaultAppExists = true;
+                    break;
                 }
+            }
+
+            if (!defaultAppExists) {
+                FirebaseApp.initializeApp(context, defaultOptions);
+                Log.d(TAG, "Central Firebase [DEFAULT] initialized successfully.");
             } else {
-                Log.d(TAG, "No user-provided Firebase config found. Initializing with default.");
-                initializeAppWithDefault(context);
+                Log.d(TAG, "Central Firebase [DEFAULT] already exists.");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to initialize central default Firebase app.", e);
+        }
+
+        // 2. Programmatically mount the user's secondary private project as the "safe_voice_circle" instance
+        String jsonConfig = EncryptionHelper.getInstance(context).getFirebaseConfig();
+
+        if (jsonConfig == null || jsonConfig.isEmpty()) {
+            // Check if there is a legacy local file fallback to maintain absolute compatibility
+            File userConfigFile = new File(context.getFilesDir(), USER_CONFIG_FILENAME);
+            if (userConfigFile.exists()) {
+                try {
+                    FileInputStream fis = new FileInputStream(userConfigFile);
+                    int size = fis.available();
+                    byte[] buffer = new byte[size];
+                    fis.read(buffer);
+                    fis.close();
+                    jsonConfig = new String(buffer, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    Log.e(TAG, "Failed to load dynamic file fallback", e);
+                }
+            }
+        }
+
+        if (jsonConfig != null && !jsonConfig.isEmpty()) {
+            try {
+                FirebaseOptions options = buildOptionsFromJson(jsonConfig);
+                boolean circleAppExists = false;
+                for (FirebaseApp app : FirebaseApp.getApps(context)) {
+                    if ("safe_voice_circle".equals(app.getName())) {
+                        circleAppExists = true;
+                        break;
+                    }
+                }
+
+                if (circleAppExists) {
+                    FirebaseApp app = FirebaseApp.getInstance("safe_voice_circle");
+                    if (!app.getOptions().getProjectId().equals(options.getProjectId())) {
+                         Log.w(TAG, "safe_voice_circle project ID mismatch. Re-initializing secondary app.");
+                         app.delete();
+                         FirebaseApp.initializeApp(context, options, "safe_voice_circle");
+                    } else {
+                         Log.d(TAG, "safe_voice_circle already initialized and matches current configuration.");
+                    }
+                } else {
+                    FirebaseApp.initializeApp(context, options, "safe_voice_circle");
+                    Log.d(TAG, "Secondary Firebase 'safe_voice_circle' initialized successfully.");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to parse or initialize secondary dynamic Firebase config.", e);
             }
         } else {
-            Log.d(TAG, "Firebase already initialized.");
+            Log.d(TAG, "No secondary safety circle Firebase config found. Waiting for user setup.");
         }
     }
 
     /**
-     * Helper method to parse a JSON InputStream and build FirebaseOptions.
+     * Re-creates the named "safe_voice_circle" Firebase instance at runtime.
+     * Overrides and saves the credentials inside the local secure preferences securely.
      */
-    private static FirebaseOptions buildOptionsFromJson(InputStream inputStream) throws IOException, org.json.JSONException {
-        // Read the entire file stream into a string
-        int size = inputStream.available();
-        byte[] buffer = new byte[size];
-        inputStream.read(buffer);
-        inputStream.close();
-        String json = new String(buffer, StandardCharsets.UTF_8);
+    public static boolean setConfiguration(Context context, String jsonConfig, String companyName, String projectId) {
+        try {
+            FirebaseOptions options = buildOptionsFromJson(jsonConfig);
+            EncryptionHelper.getInstance(context).saveFirebaseConfig(jsonConfig, companyName, projectId);
 
-        // Parse the JSON string
-        JSONObject root = new JSONObject(json);
+            boolean circleAppExists = false;
+            for (FirebaseApp app : FirebaseApp.getApps(context)) {
+                if ("safe_voice_circle".equals(app.getName())) {
+                    circleAppExists = true;
+                    break;
+                }
+            }
+
+            if (circleAppExists) {
+                FirebaseApp app = FirebaseApp.getInstance("safe_voice_circle");
+                app.delete();
+            }
+
+            FirebaseApp.initializeApp(context, options, "safe_voice_circle");
+            Log.d(TAG, "New Circle Firebase configuration saved and secondary app mounted.");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Invalid Firebase JSON provided.", e);
+            return false;
+        }
+    }
+
+    /**
+     * Parses the JSON configuration string and returns built FirebaseOptions.
+     */
+    public static FirebaseOptions buildOptionsFromJson(String jsonString) throws Exception {
+        JSONObject root = new JSONObject(jsonString);
         JSONObject projectInfo = root.getJSONObject("project_info");
         JSONArray clientArray = root.getJSONArray("client");
         JSONObject client = clientArray.getJSONObject(0);
@@ -81,7 +162,6 @@ public class FirebaseManager {
         JSONArray apiKeyArray = client.getJSONArray("api_key");
         JSONObject apiKey = apiKeyArray.getJSONObject(0);
 
-        // Build the FirebaseOptions object
         return new FirebaseOptions.Builder()
                 .setApiKey(apiKey.getString("current_key"))
                 .setApplicationId(clientInfo.getString("mobilesdk_app_id"))
@@ -91,8 +171,25 @@ public class FirebaseManager {
     }
 
     /**
-     * Helper method to initialize Firebase using the default bundled configuration.
-     * @param context The application context.
+     * Helper method to parse a JSON InputStream and build FirebaseOptions.
+     */
+    private static FirebaseOptions buildOptionsFromJson(InputStream inputStream) throws IOException, org.json.JSONException {
+        int size = inputStream.available();
+        byte[] buffer = new byte[size];
+        inputStream.read(buffer);
+        inputStream.close();
+        String json = new String(buffer, StandardCharsets.UTF_8);
+        try {
+            return buildOptionsFromJson(json);
+        } catch (org.json.JSONException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Parsing options failed", e);
+        }
+    }
+
+    /**
+     * Fallback default setup method retained to preserve backward compatibility.
      */
     private static void initializeAppWithDefault(Context context) {
         try {
@@ -105,6 +202,7 @@ public class FirebaseManager {
 
     /**
      * Saves a new google-services.json file provided by the user to the app's private storage.
+     * Mirrors the config values inside our secure SharedPreferences automatically.
      *
      * @param context The application context.
      * @param inputStream The InputStream from the user-selected file.
@@ -114,22 +212,33 @@ public class FirebaseManager {
         File userConfigFile = new File(context.getFilesDir(), USER_CONFIG_FILENAME);
         OutputStream outputStream = null;
         try {
-            outputStream = new FileOutputStream(userConfigFile);
+            ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
             int length;
             while ((length = inputStream.read(buffer)) > 0) {
-                outputStream.write(buffer, 0, length);
+                byteBuffer.write(buffer, 0, length);
             }
-            Log.d(TAG, "Successfully saved user Firebase config to: " + userConfigFile.getAbsolutePath());
+            byte[] fileBytes = byteBuffer.toByteArray();
+
+            // Write to files directory fallback
+            outputStream = new FileOutputStream(userConfigFile);
+            outputStream.write(fileBytes);
+            outputStream.close();
+
+            // Mirror file content inside local secure preferences
+            String jsonString = new String(fileBytes, StandardCharsets.UTF_8);
+            FirebaseOptions options = buildOptionsFromJson(jsonString);
+            
+            // Mirror to secure shared preferences securely
+            EncryptionHelper.getInstance(context).saveFirebaseConfig(jsonString, "My Safety Circle", options.getProjectId());
+
+            Log.d(TAG, "Successfully saved user Firebase config to files and secure SharedPreferences.");
             return true;
-        } catch (IOException e) {
+        } catch (Exception e) {
             Log.e(TAG, "Error saving user Firebase config.", e);
             return false;
         } finally {
             try {
-                if (inputStream != null) {
-                    inputStream.close();
-                }
                 if (outputStream != null) {
                     outputStream.close();
                 }
