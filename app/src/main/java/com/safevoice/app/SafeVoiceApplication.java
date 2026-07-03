@@ -17,9 +17,9 @@ public class SafeVoiceApplication extends Application {
         super.onCreate();
 
         // Initialize our custom FirebaseManager.
-        // This manager will attempt to load a user-provided google-services.json first,
-        // and if it doesn't find one, it will fall back to the one bundled with the app.
-        // This single line of code enables the dynamic Firebase backend feature.
+        // This manager will boot the central Firebase app [DEFAULT] using CentralConfig
+        // for secure Google Auth, and dynamically mount the secondary named "safe_voice_circle"
+        // instance if a private custom google-services configuration exists.
         FirebaseManager.initialize(this);
     }
 }
