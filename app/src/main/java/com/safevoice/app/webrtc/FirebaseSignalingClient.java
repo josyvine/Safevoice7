@@ -4,6 +4,7 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -18,6 +19,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Handles WebRTC call signaling via Firebase Realtime Database.
+ * Overhauled to point signaling listener channels, session keys, and authenticated
+ * user contexts directly to the custom secondary safety circle app instance.
+ */
 public class FirebaseSignalingClient {
 
     private static final String TAG = "FirebaseSignalingClient";
@@ -40,8 +46,17 @@ public class FirebaseSignalingClient {
     }
 
     public FirebaseSignalingClient() {
-        this.database = FirebaseDatabase.getInstance();
-        this.currentUserUid = Objects.requireNonNull(FirebaseAuth.getInstance().getCurrentUser()).getUid();
+        FirebaseApp circleApp;
+        try {
+            // Retrieve the custom secondary safety circle Firebase project reference
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary safe_voice_circle not initialized yet. Falling back to default app.", e);
+            circleApp = FirebaseApp.getInstance();
+        }
+
+        this.database = FirebaseDatabase.getInstance(circleApp);
+        this.currentUserUid = Objects.requireNonNull(FirebaseAuth.getInstance(circleApp).getCurrentUser()).getUid();
     }
 
     public void setListener(SignalingListener listener) {
@@ -182,4 +197,4 @@ public class FirebaseSignalingClient {
     public String getSessionId() {
         return (callSessionRef != null) ? callSessionRef.getKey() : null;
     }
-  }
+}
