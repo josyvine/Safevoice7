@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Set Up Private Circle"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#212121"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Configure your dynamic private safety network with a custom Firebase project."
+            android:textSize="14sp"
+            android:textColor="#757575"
+            android:layout_marginBottom="32dp" />
+
+        <!-- Circle Name Input -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Circle Name"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="#00796B"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/etCircleName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g., My Family Circle"
+            android:inputType="textPersonName"
+            android:minHeight="48dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Option 1: File Upload -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Option 1: Upload google-services.json"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#212121"
+            android:layout_marginBottom="12dp" />
+
+        <Button
+            android:id="@+id/btnSelectJson"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Choose JSON File"
+            android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:id="@+id/tvFileName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="No file selected"
+            android:textSize="14sp"
+            android:textColor="#00796B"
+            android:textStyle="italic"
+            android:visibility="gone"
+            android:layout_marginBottom="24dp" />
+
+        <!-- Divider line -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="24dp">
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#E0E0E0" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="OR"
+                android:textColor="#9E9E9E"
+                android:textSize="12sp"
+                android:layout_marginHorizontal="16dp" />
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:background="#E0E0E0" />
+        </LinearLayout>
+
+        <!-- Option 2: Paste Content -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Option 2: Paste Raw JSON Content"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="#212121"
+            android:layout_marginBottom="12dp" />
+
+        <EditText
+            android:id="@+id/etPasteJson"
+            android:layout_width="match_parent"
+            android:layout_height="150dp"
+            android:hint="Paste contents of google-services.json here..."
+            android:gravity="top|start"
+            android:inputType="textMultiLine"
+            android:scrollbars="vertical"
+            android:background="@drawable/bg_guide_box"
+            android:padding="12dp"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="32dp" />
+
+        <!-- Save Action Button -->
+        <Button
+            android:id="@+id/btnSaveContinue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save &amp; Continue"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginTop="auto" />
+
+    </LinearLayout>
+</ScrollView>
