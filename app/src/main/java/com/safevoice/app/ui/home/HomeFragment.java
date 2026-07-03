@@ -14,19 +14,19 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.safevoice.app.KycActivity;
-import com.safevoice.app.LoginActivity; // Import the new LoginActivity
+import com.safevoice.app.LoginActivity;
 import com.safevoice.app.R;
 import com.safevoice.app.databinding.FragmentHomeBinding;
 import com.safevoice.app.services.VoiceRecognitionService;
 
 /**
  * The fragment for the "Home" screen.
- * It provides controls to start/stop the listening service and to verify the user's identity.
+ * It provides controls to start/stop the listening service and to verify the user's profile status.
  */
 public class HomeFragment extends Fragment {
 
@@ -61,23 +61,19 @@ public class HomeFragment extends Fragment {
             }
         });
 
-        // Set up the click listener for the identity verification button.
+        // Set up the click listener for the profile status button.
         binding.buttonVerifyIdentity.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // --- THIS IS THE CRITICAL FIX ---
                 // First, check if a user is already signed in.
                 FirebaseUser currentUser = mAuth.getCurrentUser();
                 if (currentUser != null) {
-                    // If user is signed in, proceed directly to KYC.
-                    if (getActivity() != null) {
-                        Intent intent = new Intent(getActivity(), KycActivity.class);
-                        startActivity(intent);
-                    }
+                    // Guide them to set their phone number in the Profile tab instead of KYC
+                    Toast.makeText(getContext(), "Please navigate to the Profile tab to set your contact details.", Toast.LENGTH_LONG).show();
                 } else {
                     // If no user is signed in, force them to log in first.
                     if (getActivity() != null) {
-                        Toast.makeText(getContext(), "Please sign in to verify your identity.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getContext(), "Please sign in to access your profile.", Toast.LENGTH_SHORT).show();
                         Intent intent = new Intent(getActivity(), LoginActivity.class);
                         startActivity(intent);
                     }
@@ -108,44 +104,58 @@ public class HomeFragment extends Fragment {
     }
 
     /**
-     * Checks the user's verification status from Firestore and updates the UI.
+     * Checks the user's profile status from the dynamic secondary Firestore database and updates the UI.
      */
     private void updateVerificationStatusUI() {
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            // User is logged in, now check their verification status in Firestore.
-            FirebaseFirestore.getInstance().collection("users").document(currentUser.getUid())
-                    .get()
-                    .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
-                        @Override
-                        public void onComplete(@NonNull Task<DocumentSnapshot> task) {
-                            if (task.isSuccessful() && task.getResult() != null) {
-                                DocumentSnapshot document = task.getResult();
-                                boolean isVerified = document.getBoolean("isVerified") != null && document.getBoolean("isVerified");
-                                String verifiedName = document.getString("verifiedName");
+            // User is logged in, check if name and phone setup are completed on the circle database
+            try {
+                FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"))
+                        .collection("users")
+                        .document(currentUser.getUid())
+                        .get()
+                        .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
+                            @Override
+                            public void onComplete(@NonNull Task<DocumentSnapshot> task) {
+                                if (task.isSuccessful() && task.getResult() != null) {
+                                    DocumentSnapshot document = task.getResult();
+                                    String verifiedName = document.getString("verifiedName");
+                                    String phoneNumber = document.getString("phoneNumber");
 
-                                if (isVerified && verifiedName != null) {
-                                    // User is verified, show their name and hide the button.
-                                    String statusText = getString(R.string.home_verification_status_verified, verifiedName);
-                                    binding.textVerificationStatus.setText(statusText);
-                                    binding.buttonVerifyIdentity.setVisibility(View.GONE);
+                                    boolean isProfileComplete = (verifiedName != null && !verifiedName.isEmpty()) &&
+                                            (phoneNumber != null && !phoneNumber.isEmpty());
+
+                                    if (isProfileComplete) {
+                                        // Profile is complete, show the user's name and hide the action button
+                                        String statusText = "Profile Complete: " + verifiedName;
+                                        binding.textVerificationStatus.setText(statusText);
+                                        binding.buttonVerifyIdentity.setVisibility(View.GONE);
+                                    } else {
+                                        // Profile is incomplete on the dynamic database
+                                        binding.textVerificationStatus.setText("Profile Incomplete. Please set your Phone Number.");
+                                        binding.buttonVerifyIdentity.setVisibility(View.VISIBLE);
+                                        binding.buttonVerifyIdentity.setText("Complete Profile");
+                                    }
                                 } else {
-                                    // User is logged in but not verified.
-                                    binding.textVerificationStatus.setText(R.string.home_verification_status);
+                                    // Error fetching document or document doesn't exist
+                                    Log.w(TAG, "Failed to fetch user document.", task.getException());
+                                    binding.textVerificationStatus.setText("Profile Incomplete. Please set your Phone Number.");
                                     binding.buttonVerifyIdentity.setVisibility(View.VISIBLE);
+                                    binding.buttonVerifyIdentity.setText("Complete Profile");
                                 }
-                            } else {
-                                // Error fetching document or document doesn't exist.
-                                Log.w(TAG, "Failed to fetch user document.", task.getException());
-                                binding.textVerificationStatus.setText(R.string.home_verification_status);
-                                binding.buttonVerifyIdentity.setVisibility(View.VISIBLE);
                             }
-                        }
-                    });
+                        });
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Secondary safe_voice_circle app is not initialized yet.", e);
+                binding.textVerificationStatus.setText("Database Configuration Required.");
+                binding.buttonVerifyIdentity.setVisibility(View.GONE);
+            }
         } else {
-            // No user is logged in. Show the default "Not Verified" state.
-            binding.textVerificationStatus.setText(R.string.home_verification_status);
+            // No user is logged in. Show the default incomplete/not signed in state
+            binding.textVerificationStatus.setText("Not Signed In");
             binding.buttonVerifyIdentity.setVisibility(View.VISIBLE);
+            binding.buttonVerifyIdentity.setText("Sign In");
         }
     }
 
