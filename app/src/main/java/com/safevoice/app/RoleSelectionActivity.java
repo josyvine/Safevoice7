@@ -23,7 +23,7 @@ public class RoleSelectionActivity extends AppCompatActivity {
         binding = ActivityRoleSelectionBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        // Event listener for creating a private safety network
+        // Event listener for creating a private safety network (Circle Creator)
         binding.btnRoleCreator.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -31,7 +31,7 @@ public class RoleSelectionActivity extends AppCompatActivity {
             }
         });
 
-        // Event listener for joining an existing private safety network
+        // Event listener for joining an existing private safety network (Circle Member)
         binding.btnRoleMember.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -41,7 +41,8 @@ public class RoleSelectionActivity extends AppCompatActivity {
     }
 
     /**
-     * Saves the chosen role and routes the user to the database setup workspace.
+     * Saves the chosen role and routes the user based on their access permissions.
+     * Creators upload a JSON file, while Members scan a setup QR code directly.
      *
      * @param role The role string ("creator" or "member").
      */
@@ -49,8 +50,15 @@ public class RoleSelectionActivity extends AppCompatActivity {
         // Save the chosen role in secure preferences
         EncryptionHelper.getInstance(this).saveUserRole(role);
 
-        // Both roles must configure their target dynamic Firebase database connection first
-        Intent intent = new Intent(RoleSelectionActivity.this, CircleSetupActivity.class);
+        Intent intent;
+        if ("creator".equals(role)) {
+            // Circle Creators must configure their dynamic Firebase project via JSON upload
+            intent = new Intent(RoleSelectionActivity.this, CircleSetupActivity.class);
+        } else {
+            // Circle Members bypass JSON handling and scan the Creator's invite QR code directly
+            intent = new Intent(RoleSelectionActivity.this, CircleJoinQrScanActivity.class);
+        }
+        
         startActivity(intent);
 
         // Terminate the selection activity so users cannot backtrack easily
