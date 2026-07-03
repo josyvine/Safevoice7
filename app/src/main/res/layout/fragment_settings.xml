@@ -45,6 +45,15 @@
                     android:layout_marginTop="16dp"
                     android:text="@string/settings_upload_json_button" />
 
+                <!-- NEW: Dynamic Invite QR Code Generator Trigger Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonShowQr"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Show Invite QR Code"
+                    android:visibility="gone" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/buttonShowRules"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
