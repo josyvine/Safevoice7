@@ -24,7 +24,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- KYC Permissions for Safe Voice -->
+    <!-- Camera Permissions for Safe Voice -->
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Declare hardware features Safe Voice uses -->
@@ -55,13 +55,19 @@
             android:name=".MainActivity"
             android:exported="false" />
 
-        <!-- The screen for user identity verification -->
+        <!-- Onboarding role selection on first-time application launch -->
         <activity
-            android:name=".KycActivity"
-            android:label="Verify Your Identity"
+            android:name=".RoleSelectionActivity"
+            android:label="Select Role"
             android:exported="false" />
 
-        <!-- THIS IS THE NEW ACTIVITY DECLARATION FOR THE LOGIN SCREEN -->
+        <!-- User safety circle dynamic configuration setup workspace -->
+        <activity
+            android:name=".CircleSetupActivity"
+            android:label="Set Up Circle"
+            android:exported="false" />
+
+        <!-- The activity declaration for the central login gateway screen -->
         <activity
             android:name=".LoginActivity"
             android:label="Sign In"
