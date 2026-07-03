@@ -84,6 +84,9 @@ dependencies {
     // Google ZXing Core for Circle Invite QR Generator
     implementation 'com.google.zxing:core:3.5.3'
 
+    // Google Guava for handling ListenableFuture compilation safely
+    implementation 'com.google.guava:guava:33.2.1-android'
+
     // Updated WebRTC library
     implementation 'com.infobip:google-webrtc:1.0.39079'
 
