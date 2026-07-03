@@ -16,8 +16,10 @@ import androidx.navigation.NavController;
 import androidx.navigation.fragment.NavHostFragment;
 import androidx.navigation.ui.NavigationUI;
 
+import com.google.firebase.auth.FirebaseAuth;
 import com.safevoice.app.databinding.ActivityMainBinding;
 import com.safevoice.app.services.VoiceRecognitionService;
+import com.safevoice.app.utils.EncryptionHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +49,22 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 1. Verify that the dynamic safety circle configuration is complete
+        if (!EncryptionHelper.getInstance(this).isSetupDone()) {
+            Intent intent = new Intent(this, CircleSetupActivity.class);
+            startActivity(intent);
+            finish();
+            return;
+        }
+
+        // 2. Ensure that a valid user session is authenticated before displaying main UI components
+        if (FirebaseAuth.getInstance().getCurrentUser() == null) {
+            Intent intent = new Intent(this, LoginActivity.class);
+            startActivity(intent);
+            finish();
+            return;
+        }
+
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
@@ -71,7 +89,6 @@ public class MainActivity extends AppCompatActivity {
 
                         if (allGranted) {
                             Toast.makeText(MainActivity.this, "All permissions granted. Safe Voice is ready.", Toast.LENGTH_SHORT).show();
-                            // --- THIS IS THE FIX ---
                             // Automatically start the listening service once permissions are granted.
                             startVoiceService();
                         } else {
@@ -100,7 +117,6 @@ public class MainActivity extends AppCompatActivity {
             permissionLauncher.launch(permissionsToRequest.toArray(new String[0]));
         }
 
-        // --- THIS IS THE FIX ---
         // If all permissions were already granted from a previous launch,
         // start the service immediately without asking again.
         if (allPermissionsAlreadyGranted) {
