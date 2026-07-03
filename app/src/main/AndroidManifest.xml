@@ -15,23 +15,21 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- ADDED: Permissions needed for new services -->
+    <!-- Permissions needed for background alert monitoring and WebRTC signaling -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
 
     <!-- Location Permissions for Safe Voice -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Camera Permissions for Safe Voice -->
+    <!-- Camera Permissions for Safe Voice QR scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Declare hardware features Safe Voice uses -->
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
-    <!-- The application tag now matches your reference style -->
     <application
         android:name=".SafeVoiceApplication"
         android:allowBackup="true"
@@ -67,13 +65,19 @@
             android:label="Set Up Circle"
             android:exported="false" />
 
+        <!-- NEW: The QR scanning portal for family members to join existing circles -->
+        <activity
+            android:name=".CircleJoinQrScanActivity"
+            android:label="Scan Circle QR"
+            android:exported="false" />
+
         <!-- The activity declaration for the central login gateway screen -->
         <activity
             android:name=".LoginActivity"
             android:label="Sign In"
             android:exported="false" />
             
-        <!-- NEW: The full-screen activity for receiving emergency alerts -->
+        <!-- The full-screen activity for receiving emergency alerts -->
         <activity
             android:name=".EmergencyPopupActivity"
             android:exported="false"
@@ -94,7 +98,7 @@
             android:enabled="true"
             android:exported="false" />
             
-        <!-- NEW: The service for receiving Firebase Cloud Messaging alerts -->
+        <!-- The service for receiving Firebase Cloud Messaging alerts -->
         <service
             android:name=".services.FirebaseAlertService"
             android:exported="false">
