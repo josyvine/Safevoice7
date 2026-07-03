@@ -78,6 +78,12 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${camerax_version}"
     implementation "androidx.camera:camera-view:${camerax_version}"
 
+    // Google ML Kit Barcode Scanning for Circle Join QR Reader
+    implementation 'com.google.mlkit:barcode-scanning:17.3.0'
+
+    // Google ZXing Core for Circle Invite QR Generator
+    implementation 'com.google.zxing:core:3.5.3'
+
     // Updated WebRTC library
     implementation 'com.infobip:google-webrtc:1.0.39079'
 
