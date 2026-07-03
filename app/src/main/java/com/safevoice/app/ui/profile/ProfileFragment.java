@@ -10,6 +10,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentReference;
@@ -20,6 +21,10 @@ import com.safevoice.app.databinding.FragmentProfileBinding;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Handles the display and updates of the user's phone number.
+ * All changes are saved directly into the user's secondary safety circle database.
+ */
 public class ProfileFragment extends Fragment {
 
     private FragmentProfileBinding binding;
@@ -37,7 +42,13 @@ public class ProfileFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        db = FirebaseFirestore.getInstance();
+        // Retrieve Firestore connected directly to your secondary custom Firebase project
+        try {
+            db = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+        } catch (IllegalStateException e) {
+            db = FirebaseFirestore.getInstance();
+        }
+
         mAuth = FirebaseAuth.getInstance();
 
         FirebaseUser currentUser = mAuth.getCurrentUser();
@@ -97,4 +108,4 @@ public class ProfileFragment extends Fragment {
         super.onDestroyView();
         binding = null;
     }
-              }
+}
