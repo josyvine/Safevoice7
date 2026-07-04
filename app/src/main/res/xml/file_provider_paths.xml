@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Whitelist the app's internal cache directory for sharing temporary QR code invite images -->
+    <cache-path name="cache_images" path="images/" />
+    
+    <!-- Retain external path support for legacy file structures if required -->
     <external-path name="external_files" path="." />
 </paths>
-
