@@ -11,7 +11,13 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.safevoice.app.databinding.ActivityEmergencyPopupBinding;
 import com.safevoice.app.services.FirebaseAlertService;
+import com.safevoice.app.services.VoiceRecognitionService;
+import com.safevoice.app.webrtc.WebRtcCallActivity;
 
+/**
+ * High-priority lock screen popup overlay that activates when an emergency is detected.
+ * Plays the alarm siren and presents options to join the live voice call or call back via cell.
+ */
 public class EmergencyPopupActivity extends AppCompatActivity {
 
     public static final String EXTRA_CALLER_NAME = "com.safevoice.app.EXTRA_CALLER_NAME";
@@ -61,12 +67,13 @@ public class EmergencyPopupActivity extends AppCompatActivity {
         binding.buttonJoinCall.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // TODO: Implement logic to join the WebRTC call using the sessionId and callerUid
-                // For now, this is a placeholder.
-                // Intent callIntent = new Intent(EmergencyPopupActivity.this, WebRtcCallActivity.class);
-                // callIntent.putExtra("SESSION_ID", sessionId);
-                // callIntent.putExtra("CALLER_UID", callerUid);
-                // startActivity(callIntent);
+                // FIX: Launch the visual in-app WebRTC calling activity to establish direct audio
+                Intent callIntent = new Intent(EmergencyPopupActivity.this, WebRtcCallActivity.class);
+                callIntent.putExtra("SESSION_ID", sessionId);
+                callIntent.putExtra("CALLER_UID", callerUid);
+                callIntent.putExtra("IS_OUTGOING", false);
+                startActivity(callIntent);
+
                 stopAndFinish();
             }
         });
@@ -95,7 +102,9 @@ public class EmergencyPopupActivity extends AppCompatActivity {
     }
 
     private void stopAndFinish() {
+        // Stop both types of alarm sirens to ensure absolute silence when dismissed
         FirebaseAlertService.stopAlarmSound();
+        VoiceRecognitionService.stopServiceAlarm();
         finish();
     }
 
@@ -104,5 +113,6 @@ public class EmergencyPopupActivity extends AppCompatActivity {
         super.onDestroy();
         // Ensure the alarm stops if the activity is destroyed for any reason
         FirebaseAlertService.stopAlarmSound();
+        VoiceRecognitionService.stopServiceAlarm();
     }
 }
