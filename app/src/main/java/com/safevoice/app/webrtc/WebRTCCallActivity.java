@@ -13,7 +13,7 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.safevoice.app.databinding.ActivityWebRtcCallBinding;
+import com.safevoice.app.databinding.ActivityWebrtcCallBinding;
 import com.safevoice.app.services.VoiceRecognitionService;
 
 import java.util.Locale;
@@ -26,7 +26,7 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
 
     private static final String TAG = "WebRTCCallActivity";
 
-    private ActivityWebRtcCallBinding binding;
+    private ActivityWebrtcCallBinding binding;
     private WebRTCManager webRTCManager;
     private AudioManager audioManager;
 
@@ -57,7 +57,7 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        binding = ActivityWebRtcCallBinding.inflate(getLayoutInflater());
+        binding = ActivityWebrtcCallBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
         // Keep the screen awake and unlocked during an active emergency call
