@@ -33,6 +33,7 @@ import com.google.firebase.messaging.RemoteMessage;
 import com.safevoice.app.models.Contact;
 import com.safevoice.app.utils.ContactsManager;
 import com.safevoice.app.utils.LocationHelper;
+import com.safevoice.app.webrtc.WebRTCCallActivity;
 import com.safevoice.app.webrtc.WebRTCManager;
 
 import java.util.ArrayList;
@@ -145,7 +146,28 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     }
 
     private void startWebRtcCall(String targetUid) {
+        // Start WebRTC connection peer constraints
         webRTCManager.startCall(targetUid);
+
+        // Fetch dynamic secondary app reference cleanly
+        FirebaseApp circleApp;
+        try {
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+        } catch (IllegalStateException e) {
+            circleApp = FirebaseApp.getInstance();
+        }
+
+        String myUid = FirebaseAuth.getInstance(circleApp).getCurrentUser().getUid();
+        String sessionId = (webRTCManager.getSignalingClient() != null) ? webRTCManager.getSignalingClient().getSessionId() : null;
+
+        // Launch the visual call screen for the caller (Phone A) immediately
+        Intent callIntent = new Intent(this, WebRTCCallActivity.class);
+        callIntent.putExtra("CALLER_UID", myUid);
+        callIntent.putExtra("RECIPIENT_UID", targetUid);
+        callIntent.putExtra("SESSION_ID", sessionId);
+        callIntent.putExtra("IS_OUTGOING", true);
+        callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(callIntent);
     }
 
     private void sendFcmAlertsToAll(List<Contact> contacts, Location location) {
