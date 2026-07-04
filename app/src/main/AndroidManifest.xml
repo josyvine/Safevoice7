@@ -85,6 +85,14 @@
             android:showOnLockScreen="true"
             android:theme="@style/AppTheme.NoActionBar" />
 
+        <!-- NEW: Full-screen WebRTC calling screen featuring mute, speaker, and timer states -->
+        <activity
+            android:name=".webrtc.WebRTCCallActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:showOnLockScreen="true"
+            android:theme="@style/AppTheme.NoActionBar" />
+
         <!-- The "Always Listening" background service -->
         <service
             android:name=".services.VoiceRecognitionService"
