@@ -32,6 +32,7 @@ import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FirebaseFirestoreException;
+import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 import com.google.firebase.firestore.QuerySnapshot;
@@ -67,6 +68,9 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
 
     private FirebaseFirestore db;
     private FirebaseAuth mAuth;
+    
+    // Class-level reference to detach the listener and prevent background thread crashes
+    private ListenerRegistration requestListenerReg;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -164,11 +168,19 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser == null) return;
 
-        db.collection("connection_requests")
+        // Clean up previous registration instance if already active
+        if (requestListenerReg != null) {
+            requestListenerReg.remove();
+        }
+
+        requestListenerReg = db.collection("connection_requests")
                 .whereEqualTo("recipientUid", currentUser.getUid())
                 .addSnapshotListener(new com.google.firebase.firestore.EventListener<QuerySnapshot>() {
                     @Override
                     public void onEvent(@Nullable QuerySnapshot snapshots, @Nullable com.google.firebase.firestore.FirebaseFirestoreException e) {
+                        // Guard check to prevent asynchronous crashes if view is destroyed before Firestore responds
+                        if (binding == null) return;
+
                         if (e != null) {
                             Log.w(TAG, "Listen failed.", e);
                             return;
@@ -184,6 +196,9 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
     }
 
     private void updateRequestUiVisibility() {
+        // Guard check to prevent asynchronous NullPointer crashes
+        if (binding == null) return;
+
         if (incomingRequestList.isEmpty()) {
             binding.recyclerViewRequests.setVisibility(View.GONE);
             binding.textNoRequests.setVisibility(View.VISIBLE);
@@ -465,6 +480,11 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        // Detach the real-time listener to prevent background leaks and NullPointer crashes
+        if (requestListenerReg != null) {
+            requestListenerReg.remove();
+            requestListenerReg = null;
+        }
         binding = null;
     }
 }
