@@ -24,6 +24,8 @@ import com.google.android.gms.tasks.Task;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -34,13 +36,15 @@ import com.safevoice.app.utils.LocationHelper;
 import com.safevoice.app.webrtc.WebRTCManager;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Service that handles the emergency sequence when triggered.
  * Resolves high-accuracy GPS coordinates and dispatches automated emergency alerts.
- * SMS warning layouts are dispatched first, and then online FCM signalling routes are triggered
- * over the custom "safe_voice_circle" database structure.
+ * SMS warning layouts are dispatched first, and then online FCM and Realtime Database
+ * signalling routes are triggered over the custom "safe_voice_circle" database structure.
  */
 public class EmergencyHandlerService extends Service implements WebRTCManager.WebRTCListener {
 
@@ -145,11 +149,20 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     }
 
     private void sendFcmAlertsToAll(List<Contact> contacts, Location location) {
-        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        FirebaseApp circleApp;
+        try {
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary safe_voice_circle app is not initialized yet.", e);
+            return;
+        }
+
+        // Use the authenticated session on the secondary custom Firebase instance
+        FirebaseUser currentUser = FirebaseAuth.getInstance(circleApp).getCurrentUser();
         if (currentUser == null) return;
 
         // Retrieve Firestore connected to your custom "safe_voice_circle" named app instance
-        FirebaseFirestore dynamicDb = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+        FirebaseFirestore dynamicDb = FirebaseFirestore.getInstance(circleApp);
 
         dynamicDb.collection("users").document(currentUser.getUid()).get()
             .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
@@ -161,7 +174,11 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
 
                         for (Contact contact : contacts) {
                             if (contact.getUid() != null) {
+                                // 1. Send the standard FCM message
                                 sendFcmMessage(contact.getUid(), callerName, currentUser.getUid(), location, dynamicDb);
+                                
+                                // 2. Send the instant real-time database signaling trigger
+                                sendRealtimeDbAlert(circleApp, contact.getUid(), callerName, currentUser.getUid(), location);
                             }
                         }
                     }
@@ -199,6 +216,40 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             });
     }
 
+    /**
+     * Writes the emergency trigger payload directly to the shared Realtime Database.
+     * This bypasses local client-to-client FCM limits and wakes up the recipient's phone instantly.
+     */
+    private void sendRealtimeDbAlert(FirebaseApp circleApp, String recipientUid, String callerName, String callerUid, Location location) {
+        try {
+            FirebaseDatabase rtdb = FirebaseDatabase.getInstance(circleApp);
+            DatabaseReference alertsRef = rtdb.getReference("alerts").child(recipientUid);
+
+            Map<String, Object> alertPayload = new HashMap<>();
+            alertPayload.put("callerUid", callerUid);
+            alertPayload.put("callerName", callerName);
+
+            if (location != null) {
+                alertPayload.put("location", location.getLatitude() + "," + location.getLongitude());
+            } else {
+                alertPayload.put("location", "0.0,0.0");
+            }
+
+            if (webRTCManager != null && webRTCManager.getSignalingClient().getSessionId() != null) {
+                alertPayload.put("sessionId", webRTCManager.getSignalingClient().getSessionId());
+            } else {
+                alertPayload.put("sessionId", "pending");
+            }
+
+            alertsRef.setValue(alertPayload)
+                    .addOnSuccessListener(aVoid -> Log.d(TAG, "Realtime DB Alert written successfully for recipient: " + recipientUid))
+                    .addOnFailureListener(e -> Log.e(TAG, "Failed to write Realtime DB Alert.", e));
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error compiling Realtime DB alert", e);
+        }
+    }
+
     private void makePhoneCall(String phoneNumber) {
         if (phoneNumber == null || phoneNumber.isEmpty()) {
             Log.e(TAG, "Phone number is invalid. Cannot make call.");
@@ -219,7 +270,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             Log.e(TAG, "Phone number is invalid for SMS.");
             return;
         }
-        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        FirebaseUser currentUser = FirebaseAuth.getInstance(FirebaseApp.getInstance("safe_voice_circle")).getCurrentUser();
         String userName = (currentUser != null && currentUser.getDisplayName() != null) ? currentUser.getDisplayName() : "a Safe Voice user";
         String message = "EMERGENCY: Automated alert from Safe Voice for " + userName + ". They may be in trouble.";
         if (location != null) {
