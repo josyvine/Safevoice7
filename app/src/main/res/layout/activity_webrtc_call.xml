@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1A1A1A"
+    android:padding="24dp">
+
+    <!-- App Logo Header -->
+    <ImageView
+        android:id="@+id/ivCallLogo"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="80dp"
+        android:src="@drawable/safevoice"
+        android:contentDescription="Safe Voice Logo" />
+
+    <TextView
+        android:id="@+id/textCallTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/ivCallLogo"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="24dp"
+        android:text="Safe Voice Emergency Call"
+        android:textColor="#E0E0E0"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <!-- Call Status / Timer Display -->
+    <TextView
+        android:id="@+id/textCallStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/textCallTitle"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="12dp"
+        android:text="Connecting..."
+        android:textColor="#00B0FF"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!-- Controls Action Panel (At the Bottom) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_alignParentBottom="true"
+        android:layout_marginBottom="48dp">
+
+        <!-- Microphone Mute/Unmute Toggle Button -->
+        <ImageButton
+            android:id="@+id/buttonMute"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:contentDescription="Mute Microphone"
+            android:layout_marginEnd="32dp" />
+
+        <!-- End Call / Hang Up Button (Red Circular Button) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonHangUp"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:insetPadding="0dp"
+            app:cornerRadius="36dp"
+            app:backgroundTint="#D32F2F"
+            app:icon="@android:drawable/ic_menu_close_clear_cancel"
+            app:iconSize="32dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconTint="#FFFFFF"
+            android:contentDescription="End Call" />
+
+        <!-- Speakerphone Toggle Button -->
+        <ImageButton
+            android:id="@+id/buttonSpeaker"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_lock_silent_mode_off"
+            android:contentDescription="Toggle Speaker"
+            android:layout_marginStart="32dp" />
+
+    </LinearLayout>
+
+</RelativeLayout>
