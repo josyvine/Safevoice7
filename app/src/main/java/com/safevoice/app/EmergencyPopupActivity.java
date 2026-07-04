@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.safevoice.app.databinding.ActivityEmergencyPopupBinding;
 import com.safevoice.app.services.FirebaseAlertService;
 import com.safevoice.app.services.VoiceRecognitionService;
-import com.safevoice.app.webrtc.WebRtcCallActivity;
+import com.safevoice.app.webrtc.WebRTCCallActivity;
 
 /**
  * High-priority lock screen popup overlay that activates when an emergency is detected.
@@ -68,7 +68,7 @@ public class EmergencyPopupActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 // FIX: Launch the visual in-app WebRTC calling activity to establish direct audio
-                Intent callIntent = new Intent(EmergencyPopupActivity.this, WebRtcCallActivity.class);
+                Intent callIntent = new Intent(EmergencyPopupActivity.this, WebRTCCallActivity.class);
                 callIntent.putExtra("SESSION_ID", sessionId);
                 callIntent.putExtra("CALLER_UID", callerUid);
                 callIntent.putExtra("IS_OUTGOING", false);
@@ -115,4 +115,4 @@ public class EmergencyPopupActivity extends AppCompatActivity {
         FirebaseAlertService.stopAlarmSound();
         VoiceRecognitionService.stopServiceAlarm();
     }
-} 
+}
