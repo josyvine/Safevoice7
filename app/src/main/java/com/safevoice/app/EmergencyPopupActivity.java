@@ -115,4 +115,4 @@ public class EmergencyPopupActivity extends AppCompatActivity {
         FirebaseAlertService.stopAlarmSound();
         VoiceRecognitionService.stopServiceAlarm();
     }
-}
+} 
