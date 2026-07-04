@@ -98,7 +98,7 @@
             android:enabled="true"
             android:exported="false" />
             
-        <!-- The service for receiving Firebase Cloud Messaging alerts -->
+        <!-- NEW: The service for receiving Firebase Cloud Messaging alerts -->
         <service
             android:name=".services.FirebaseAlertService"
             android:exported="false">
@@ -106,6 +106,17 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!-- Secure File Provider declaration needed for outward image sharing -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.safevoice.app.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
         <!-- CRITICAL: This disables the default Firebase initializer,
              allowing our app to load the configuration dynamically at runtime. -->
