@@ -94,7 +94,7 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
             db = FirebaseFirestore.getInstance();
         }
 
-        // FIX: Instantiate mAuth using the same secondary circle app context to resolve the UID mismatch
+        // Instantiate mAuth using the same secondary circle app context to resolve the UID mismatch
         mAuth = FirebaseAuth.getInstance(circleApp);
         contactsManager = ContactsManager.getInstance(requireContext());
 
@@ -132,7 +132,8 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
         binding.buttonSetPrimaryContact.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                showAddEditContactDialog(null, true);
+                // Modified to launch the select dialog to resolve the UID Gap
+                showSetPrimaryContactDialog();
             }
         });
 
@@ -142,6 +143,37 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                 showSearchUserDialog();
             }
         });
+    }
+
+    /**
+     * Shows a dialog listing existing priority contacts to select from.
+     * This guarantees that the primary contact always contains a valid Firebase UID.
+     */
+    private void showSetPrimaryContactDialog() {
+        List<Contact> priorityContacts = contactsManager.getPriorityContacts();
+        if (priorityContacts.isEmpty()) {
+            Toast.makeText(getContext(), "Please add at least one priority contact first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String[] names = new String[priorityContacts.size()];
+        for (int i = 0; i < priorityContacts.size(); i++) {
+            names[i] = priorityContacts.get(i).getName() + " (" + priorityContacts.get(i).getPhoneNumber() + ")";
+        }
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("Select Primary Contact")
+                .setItems(names, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Contact selectedContact = priorityContacts.get(which);
+                        contactsManager.savePrimaryContact(selectedContact);
+                        loadContacts();
+                        Toast.makeText(getContext(), "Primary Contact set to: " + selectedContact.getName(), Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void loadContacts() {
