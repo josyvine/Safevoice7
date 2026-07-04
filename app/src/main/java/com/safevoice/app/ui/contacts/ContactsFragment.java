@@ -79,14 +79,19 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        // Retrieve Firestore connected directly to your secondary custom Firebase project
+        FirebaseApp circleApp;
+        // Retrieve dynamic secondary Firebase App instance safely to handle dynamic queries
         try {
-            db = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+            db = FirebaseFirestore.getInstance(circleApp);
         } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary safe_voice_circle app is not initialized yet. Falling back.", e);
+            circleApp = FirebaseApp.getInstance();
             db = FirebaseFirestore.getInstance();
         }
 
-        mAuth = FirebaseAuth.getInstance();
+        // FIX: Instantiate mAuth using the same secondary circle app context to resolve the UID mismatch
+        mAuth = FirebaseAuth.getInstance(circleApp);
         contactsManager = ContactsManager.getInstance(requireContext());
 
         priorityContactList = new ArrayList<>();
