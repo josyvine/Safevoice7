@@ -42,14 +42,21 @@ public class ProfileFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        FirebaseApp circleApp = null;
         // Retrieve Firestore connected directly to your secondary custom Firebase project
         try {
-            db = FirebaseFirestore.getInstance(FirebaseApp.getInstance("safe_voice_circle"));
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+            db = FirebaseFirestore.getInstance(circleApp);
         } catch (IllegalStateException e) {
             db = FirebaseFirestore.getInstance();
         }
 
-        mAuth = FirebaseAuth.getInstance();
+        // Initialize mAuth from the secondary circleApp to prevent the UID mismatch bug
+        if (circleApp != null) {
+            mAuth = FirebaseAuth.getInstance(circleApp);
+        } else {
+            mAuth = FirebaseAuth.getInstance();
+        }
 
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
@@ -69,13 +76,16 @@ public class ProfileFragment extends Fragment {
 
         // Fetch the user's document from Firestore
         userProfileRef.get().addOnSuccessListener(documentSnapshot -> {
+            if (binding == null) return; // Guard against fragment view destruction
             if (documentSnapshot.exists()) {
                 // Get the phone number from the document and set it in the text field
                 String phoneNumber = documentSnapshot.getString("phoneNumber");
                 binding.editTextProfilePhone.setText(phoneNumber);
             }
         }).addOnFailureListener(e -> {
-            Toast.makeText(getContext(), "Failed to load profile.", Toast.LENGTH_SHORT).show();
+            if (getContext() != null) {
+                Toast.makeText(getContext(), "Failed to load profile.", Toast.LENGTH_SHORT).show();
+            }
         });
     }
 
@@ -99,8 +109,16 @@ public class ProfileFragment extends Fragment {
         // SetOptions.merge() is crucial: it updates the phoneNumber field
         // without deleting other existing fields like 'verifiedName' or 'email'.
         userProfileRef.set(profileData, SetOptions.merge())
-            .addOnSuccessListener(aVoid -> Toast.makeText(getContext(), "Profile saved successfully!", Toast.LENGTH_SHORT).show())
-            .addOnFailureListener(e -> Toast.makeText(getContext(), "Failed to save profile.", Toast.LENGTH_SHORT).show());
+            .addOnSuccessListener(aVoid -> {
+                if (getContext() != null) {
+                    Toast.makeText(getContext(), "Profile saved successfully!", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .addOnFailureListener(e -> {
+                if (getContext() != null) {
+                    Toast.makeText(getContext(), "Failed to save profile.", Toast.LENGTH_SHORT).show();
+                }
+            });
     }
 
     @Override
