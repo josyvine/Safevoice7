@@ -141,14 +141,8 @@ public class VoiceRecognitionService extends Service {
                             // 2. Play the loud siren alarm tone
                             playServiceAlarmSound();
 
-                            // 3. Launch the full-screen EmergencyPopupActivity
-                            Intent popupIntent = new Intent(VoiceRecognitionService.this, EmergencyPopupActivity.class);
-                            popupIntent.putExtra(EmergencyPopupActivity.EXTRA_CALLER_NAME, callerName);
-                            popupIntent.putExtra(EmergencyPopupActivity.EXTRA_CALLER_UID, callerUid);
-                            popupIntent.putExtra(EmergencyPopupActivity.EXTRA_SESSION_ID, sessionId);
-                            popupIntent.putExtra(EmergencyPopupActivity.EXTRA_LOCATION, location);
-                            popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                            startActivity(popupIntent);
+                            // 3. Launch the full-screen EmergencyPopupActivity via secure Notification Intent
+                            showEmergencyNotificationAndPopup(callerName, callerUid, sessionId, location);
 
                             // 4. Delete the database node immediately to consume the alert and prevent looping
                             snapshot.getRef().removeValue();
@@ -167,6 +161,66 @@ public class VoiceRecognitionService extends Service {
 
         } catch (Exception e) {
             Log.e(TAG, "Error initializing Realtime Alert listener", e);
+        }
+    }
+
+    /**
+     * Uses a high-priority system channel to launch the incoming Emergency overlay.
+     * This bypasses Android 10+ background activity restrictions securely.
+     */
+    private void showEmergencyNotificationAndPopup(String callerName, String callerUid, String sessionId, String location) {
+        String emergencyChannelId = "EmergencyAlertChannel";
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    emergencyChannelId,
+                    "Emergency Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            channel.setDescription("High-priority alerts for Safe Voice emergencies");
+            channel.enableVibration(true);
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            if (notificationManager != null) {
+                notificationManager.createNotificationChannel(channel);
+            }
+        }
+
+        Intent popupIntent = new Intent(this, EmergencyPopupActivity.class);
+        popupIntent.putExtra(EmergencyPopupActivity.EXTRA_CALLER_NAME, callerName);
+        popupIntent.putExtra(EmergencyPopupActivity.EXTRA_CALLER_UID, callerUid);
+        popupIntent.putExtra(EmergencyPopupActivity.EXTRA_SESSION_ID, sessionId);
+        popupIntent.putExtra(EmergencyPopupActivity.EXTRA_LOCATION, location);
+        
+        int uniqueId = (callerUid != null) ? callerUid.hashCode() : (int) System.currentTimeMillis();
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                uniqueId,
+                popupIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, emergencyChannelId)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("EMERGENCY ALERT")
+                .setContentText(callerName + " has triggered a Safe Voice alert!")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setFullScreenIntent(pendingIntent, true) // This bypasses OS-level background locks
+                .setContentIntent(pendingIntent);
+
+        if (notificationManager != null) {
+            notificationManager.notify(2, notificationBuilder.build());
+        }
+
+        // Direct launch fallback for older Android versions
+        try {
+            popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(popupIntent);
+        } catch (Exception e) {
+            Log.w(TAG, "Direct activity launch restricted. Displaying alert via full-screen intent notification.");
         }
     }
 
