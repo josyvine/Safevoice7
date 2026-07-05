@@ -1,6 +1,10 @@
 package com.safevoice.app.services;
 
 import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -10,6 +14,7 @@ import android.location.Location;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.IBinder;
 import android.telephony.SmsManager;
 import android.util.Log;
@@ -17,6 +22,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.gms.tasks.OnCompleteListener;
@@ -30,6 +36,7 @@ import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.RemoteMessage;
+import com.safevoice.app.R;
 import com.safevoice.app.models.Contact;
 import com.safevoice.app.utils.ContactsManager;
 import com.safevoice.app.utils.LocationHelper;
@@ -91,6 +98,17 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         Contact primaryContact = contactsManager.getPrimaryContact();
         List<Contact> priorityContacts = contactsManager.getPriorityContacts();
 
+        // Check call preference early to manage signaling session generation
+        SharedPreferences settingsPrefs = getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE);
+        String callPreference = settingsPrefs.getString(KEY_CALL_PREFERENCE, "standard");
+
+        // Generate the signaling session ID first, so it gets injected into the FCM/Realtime Alerts correctly
+        if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
+            if (webRTCManager != null) {
+                webRTCManager.startCall(primaryContact.getUid());
+            }
+        }
+
         // Send SMS to the primary contact
         if (primaryContact != null && primaryContact.getPhoneNumber() != null && !primaryContact.getPhoneNumber().isEmpty()) {
             sendSmsAlert(primaryContact.getPhoneNumber(), location);
@@ -115,12 +133,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         if (isOnline()) {
             Log.d(TAG, "Device is ONLINE. Executing advanced plan.");
 
-            // Send in-app FCM alerts to priority contacts
+            // Send in-app FCM alerts to priority contacts (they will now receive the generated session ID)
             sendFcmAlertsToAll(priorityContacts, location);
-
-            // Smart Calling configuration check
-            SharedPreferences settingsPrefs = getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE);
-            String callPreference = settingsPrefs.getString(KEY_CALL_PREFERENCE, "standard");
 
             if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
                 Log.d(TAG, "Starting WebRTC call.");
@@ -146,9 +160,6 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     }
 
     private void startWebRtcCall(String targetUid) {
-        // Start WebRTC connection peer constraints
-        webRTCManager.startCall(targetUid);
-
         // Fetch dynamic secondary app reference cleanly
         FirebaseApp circleApp;
         try {
@@ -158,7 +169,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         }
 
         String myUid = FirebaseAuth.getInstance(circleApp).getCurrentUser().getUid();
-        String sessionId = (webRTCManager.getSignalingClient() != null) ? webRTCManager.getSignalingClient().getSessionId() : null;
+        String sessionId = (webRTCManager != null && webRTCManager.getSignalingClient() != null) ? 
+                webRTCManager.getSignalingClient().getSessionId() : null;
 
         // Launch the visual call screen for the caller (Phone A) immediately
         Intent callIntent = new Intent(this, WebRTCCallActivity.class);
@@ -166,8 +178,59 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         callIntent.putExtra("RECIPIENT_UID", targetUid);
         callIntent.putExtra("SESSION_ID", sessionId);
         callIntent.putExtra("IS_OUTGOING", true);
-        callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(callIntent);
+        
+        showCallerWebRtcOverlayNotification(callIntent);
+    }
+
+    /**
+     * Uses a high-priority system channel to launch the outgoing WebRTC Call interface.
+     * This bypasses Android 10+ background activity restrictions securely.
+     */
+    private void showCallerWebRtcOverlayNotification(Intent callIntent) {
+        String channelId = "EmergencyCallerChannel";
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    "Emergency Call Outgoing",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            channel.setDescription("Launches the outgoing WebRTC call interface");
+            channel.enableVibration(true);
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            if (notificationManager != null) {
+                notificationManager.createNotificationChannel(channel);
+            }
+        }
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                101,
+                callIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("Emergency Call Initiated")
+                .setContentText("Tap to open your live emergency voice call.")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setFullScreenIntent(pendingIntent, true) // Wakes screen and displays call UI on Android 10+
+                .setContentIntent(pendingIntent);
+
+        if (notificationManager != null) {
+            notificationManager.notify(101, notificationBuilder.build());
+        }
+
+        // Direct launch fallback for older Android versions
+        try {
+            startActivity(callIntent);
+        } catch (Exception e) {
+            Log.w(TAG, "Direct call activity launch restricted. Relying on full-screen intent notification.");
+        }
     }
 
     private void sendFcmAlertsToAll(List<Contact> contacts, Location location) {
