@@ -234,7 +234,7 @@ public class FirebaseSignalingClient {
         }
         Map<String, Object> candidateData = new HashMap<>();
         candidateData.put("sdpMid", iceCandidate.sdpMid);
-        candidateData.put("sdpMLineIndex", iceCandidate.iceCandidate.sdpMLineIndex); // Explicit IceCandidate inner property
+        candidateData.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
         candidateData.put("sdp", iceCandidate.sdp);
 
         // Caller uploads to caller_ice; callee uploads to callee_ice
