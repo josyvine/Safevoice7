@@ -16,6 +16,7 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
+import android.provider.Settings;
 import android.telephony.SmsManager;
 import android.util.Log;
 import android.widget.Toast;
@@ -39,6 +40,7 @@ import com.google.firebase.messaging.RemoteMessage;
 import com.safevoice.app.R;
 import com.safevoice.app.models.Contact;
 import com.safevoice.app.utils.ContactsManager;
+import com.safevoice.app.utils.DiagnosticLogger;
 import com.safevoice.app.utils.LocationHelper;
 import com.safevoice.app.webrtc.WebRTCCallActivity;
 import com.safevoice.app.webrtc.WebRTCManager;
@@ -67,17 +69,18 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     @Override
     public void onCreate() {
         super.onCreate();
+        DiagnosticLogger.logInfo(TAG, "EmergencyHandlerService onCreate() invoked. Initializing helpers.");
         locationHelper = new LocationHelper(this);
         webRTCManager = new WebRTCManager(getApplicationContext(), this);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.i(TAG, "Emergency sequence initiated.");
+        DiagnosticLogger.logInfo(TAG, "onStartCommand() invoked with startId: " + startId);
         Toast.makeText(this, "Emergency Triggered! Sending alerts...", Toast.LENGTH_LONG).show();
 
         if (!hasRequiredPermissions()) {
-            Log.e(TAG, "Cannot proceed with emergency alerts. Missing permissions.");
+            DiagnosticLogger.logError(TAG, "Execution aborted. Missing critical location, call, or SMS permissions.");
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -85,8 +88,12 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         locationHelper.getCurrentLocation(new LocationHelper.LocationResultCallback() {
             @Override
             public void onLocationResult(Location location) {
+                if (location != null) {
+                    DiagnosticLogger.logInfo(TAG, "GPS location resolved successfully: Latitude " + location.getLatitude() + ", Longitude " + location.getLongitude());
+                } else {
+                    DiagnosticLogger.logWarn(TAG, "GPS location returned null. Attempting emergency action dispatcher with null location fallback.");
+                }
                 executeEmergencyActions(location);
-                // The service will stop itself after actions are complete
             }
         });
 
@@ -98,13 +105,17 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         Contact primaryContact = contactsManager.getPrimaryContact();
         List<Contact> priorityContacts = contactsManager.getPriorityContacts();
 
+        DiagnosticLogger.logInfo(TAG, "Emergency Actions sequence initiated.");
+
         // Check call preference early to manage signaling session generation
         SharedPreferences settingsPrefs = getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE);
         String callPreference = settingsPrefs.getString(KEY_CALL_PREFERENCE, "standard");
+        DiagnosticLogger.logInfo(TAG, "Active calling preference resolved: " + callPreference);
 
         // Generate the signaling session ID first, so it gets injected into the FCM/Realtime Alerts correctly
         if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
             if (webRTCManager != null) {
+                DiagnosticLogger.logInfo(TAG, "WebRTC preference active. Generating dynamic signaling session ID on RTDB before alert dispatch.");
                 webRTCManager.startCall(primaryContact.getUid());
             }
         }
@@ -113,7 +124,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         if (primaryContact != null && primaryContact.getPhoneNumber() != null && !primaryContact.getPhoneNumber().isEmpty()) {
             sendSmsAlert(primaryContact.getPhoneNumber(), location);
         } else {
-            Log.w(TAG, "No primary contact with a phone number set. Cannot send primary SMS.");
+            DiagnosticLogger.logWarn(TAG, "No primary contact phone number configured. Primary SMS dispatch skipped.");
         }
 
         // Send SMS to all other priority contacts
@@ -127,25 +138,24 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                 }
             }
         } else {
-            Log.w(TAG, "No additional priority contacts to send SMS to.");
+            DiagnosticLogger.logWarn(TAG, "Priority contacts list is empty. Additional SMS dispatches skipped.");
         }
 
         if (isOnline()) {
-            Log.d(TAG, "Device is ONLINE. Executing advanced plan.");
+            DiagnosticLogger.logInfo(TAG, "Network connection detected. Executing advanced online alerts strategy.");
 
             // Send in-app FCM alerts to priority contacts (they will now receive the generated session ID)
             sendFcmAlertsToAll(priorityContacts, location);
 
             if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
-                Log.d(TAG, "Starting WebRTC call.");
                 startWebRtcCall(primaryContact.getUid());
             } else {
-                Log.d(TAG, "Making standard phone call as per preference or fallback.");
+                DiagnosticLogger.logInfo(TAG, "Making standard fallback cellular call as per settings preference.");
                 makeStandardPhoneCall(primaryContact);
                 stopSelf();
             }
         } else {
-            Log.d(TAG, "Device is OFFLINE. Executing fallback plan.");
+            DiagnosticLogger.logWarn(TAG, "Device is OFFLINE. Executing standard fallback cellular strategy.");
             makeStandardPhoneCall(primaryContact);
             stopSelf();
         }
@@ -155,12 +165,11 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         if (primaryContact != null) {
             makePhoneCall(primaryContact.getPhoneNumber());
         } else {
-            Log.w(TAG, "No primary contact set. Cannot make emergency call.");
+            DiagnosticLogger.logWarn(TAG, "No primary contact configured. Fallback cellular call aborted.");
         }
     }
 
     private void startWebRtcCall(String targetUid) {
-        // Fetch dynamic secondary app reference cleanly
         FirebaseApp circleApp;
         try {
             circleApp = FirebaseApp.getInstance("safe_voice_circle");
@@ -171,6 +180,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         String myUid = FirebaseAuth.getInstance(circleApp).getCurrentUser().getUid();
         String sessionId = (webRTCManager != null && webRTCManager.getSignalingClient() != null) ? 
                 webRTCManager.getSignalingClient().getSessionId() : null;
+
+        DiagnosticLogger.logInfo(TAG, "Launching WebRTC Calling UI for caller. Session ID: " + sessionId + ", Target UID: " + targetUid);
 
         // Launch the visual call screen for the caller (Phone A) immediately
         Intent callIntent = new Intent(this, WebRTCCallActivity.class);
@@ -225,11 +236,24 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             notificationManager.notify(101, notificationBuilder.build());
         }
 
-        // Direct launch fallback for older Android versions
-        try {
-            startActivity(callIntent);
-        } catch (Exception e) {
-            Log.w(TAG, "Direct call activity launch restricted. Relying on full-screen intent notification.");
+        // Direct launch using SYSTEM_ALERT_WINDOW overlay permission to guarantee instant launch without tapping
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+            try {
+                callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(callIntent);
+                DiagnosticLogger.logInfo(TAG, "Launched WebRTCCallActivity directly via overlay permission (zero-touch).");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed direct overlay activity start fallback.", e);
+            }
+        } else {
+            // Direct launch fallback for older Android versions
+            try {
+                callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(callIntent);
+                DiagnosticLogger.logInfo(TAG, "Direct launch initiated.");
+            } catch (Exception e) {
+                DiagnosticLogger.logWarn(TAG, "Direct call activity launch restricted by OS settings. Relying on full-screen intent notification.");
+            }
         }
     }
 
@@ -238,13 +262,16 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         try {
             circleApp = FirebaseApp.getInstance("safe_voice_circle");
         } catch (IllegalStateException e) {
-            Log.e(TAG, "Secondary safe_voice_circle app is not initialized yet.", e);
+            DiagnosticLogger.logError(TAG, "Secondary safe_voice_circle app is not initialized yet.", e);
             return;
         }
 
         // Use the authenticated session on the secondary custom Firebase instance
         FirebaseUser currentUser = FirebaseAuth.getInstance(circleApp).getCurrentUser();
-        if (currentUser == null) return;
+        if (currentUser == null) {
+            DiagnosticLogger.logWarn(TAG, "Authenticated user session missing. Online dispatches aborted.");
+            return;
+        }
 
         // Retrieve Firestore connected to your custom "safe_voice_circle" named app instance
         FirebaseFirestore dynamicDb = FirebaseFirestore.getInstance(circleApp);
@@ -257,6 +284,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                         String callerName = task.getResult().getString("verifiedName");
                         if (callerName == null) callerName = currentUser.getDisplayName();
 
+                        DiagnosticLogger.logInfo(TAG, "Resolving profiles for active dispatches. Sender name: " + callerName);
+
                         for (Contact contact : contacts) {
                             if (contact.getUid() != null) {
                                 // 1. Send the standard FCM message
@@ -266,6 +295,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                                 sendRealtimeDbAlert(circleApp, contact.getUid(), callerName, currentUser.getUid(), location);
                             }
                         }
+                    } else {
+                        DiagnosticLogger.logError(TAG, "Failed to fetch sender profile document from Firestore.", task.getException());
                     }
                 }
             });
@@ -294,8 +325,12 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                             }
 
                             FirebaseMessaging.getInstance().send(messageBuilder.build());
-                            Log.d(TAG, "Sent FCM alert to " + recipientUid);
+                            DiagnosticLogger.logInfo(TAG, "FCM downstream dispatch queued for recipient Token: " + fcmToken);
+                        } else {
+                            DiagnosticLogger.logWarn(TAG, "FCM registration token missing for recipient UID: " + recipientUid + ". Downstream FCM dispatch skipped.");
                         }
+                    } else {
+                        DiagnosticLogger.logError(TAG, "Failed to fetch recipient profile document from Firestore.", task.getException());
                     }
                 }
             });
@@ -326,33 +361,36 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                 alertPayload.put("sessionId", "pending");
             }
 
+            DiagnosticLogger.logInfo(TAG, "Uploading real-time database trigger payload to path: " + alertsRef.getPath());
+
             alertsRef.setValue(alertPayload)
-                    .addOnSuccessListener(aVoid -> Log.d(TAG, "Realtime DB Alert written successfully for recipient: " + recipientUid))
+                    .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "Realtime DB Alert written successfully for recipient: " + recipientUid))
                     .addOnFailureListener(e -> Log.e(TAG, "Failed to write Realtime DB Alert.", e));
 
         } catch (Exception e) {
-            Log.e(TAG, "Error compiling Realtime DB alert", e);
+            DiagnosticLogger.logError(TAG, "Error compiling or uploading Realtime DB alert payload.", e);
         }
     }
 
     private void makePhoneCall(String phoneNumber) {
         if (phoneNumber == null || phoneNumber.isEmpty()) {
-            Log.e(TAG, "Phone number is invalid. Cannot make call.");
+            DiagnosticLogger.logError(TAG, "Phone number is null or empty. Cellular call skipped.");
             return;
         }
         Intent callIntent = new Intent(Intent.ACTION_CALL);
         callIntent.setData(Uri.parse("tel:" + phoneNumber));
         callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
+            DiagnosticLogger.logInfo(TAG, "Initiating direct standard cellular call to: " + phoneNumber);
             startActivity(callIntent);
         } catch (SecurityException e) {
-            Log.e(TAG, "CALL_PHONE permission missing or denied.", e);
+            DiagnosticLogger.logError(TAG, "CALL_PHONE permission is missing or was revoked.", e);
         }
     }
 
     private void sendSmsAlert(String phoneNumber, Location location) {
         if (phoneNumber == null || phoneNumber.isEmpty() || phoneNumber.equals("No number provided")) {
-            Log.e(TAG, "Phone number is invalid for SMS.");
+            DiagnosticLogger.logWarn(TAG, "Phone number is invalid or not provided. SMS dispatch skipped.");
             return;
         }
         FirebaseUser currentUser = FirebaseAuth.getInstance(FirebaseApp.getInstance("safe_voice_circle")).getCurrentUser();
@@ -364,16 +402,19 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         try {
             SmsManager smsManager = SmsManager.getDefault();
             smsManager.sendMultipartTextMessage(phoneNumber, null, smsManager.divideMessage(message), null, null);
-            Log.i(TAG, "SMS alert sent to " + phoneNumber);
+            DiagnosticLogger.logInfo(TAG, "Emergency SMS alert dispatched successfully to: " + phoneNumber);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to send SMS to " + phoneNumber, e);
+            DiagnosticLogger.logError(TAG, "Failed to send emergency SMS dispatch to: " + phoneNumber, e);
         }
     }
 
     private boolean isOnline() {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo netInfo = cm.getActiveNetworkInfo();
-        return netInfo != null && netInfo.isConnectedOrConnecting();
+        if (cm != null) {
+            NetworkInfo netInfo = cm.getActiveNetworkInfo();
+            return netInfo != null && netInfo.isConnectedOrConnecting();
+        }
+        return false;
     }
 
     private boolean hasRequiredPermissions() {
@@ -391,6 +432,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     @Override
     public void onDestroy() {
         super.onDestroy();
+        DiagnosticLogger.logInfo(TAG, "EmergencyHandlerService onDestroy() invoked. Tearing down active managers.");
         if (webRTCManager != null) {
             webRTCManager.cleanup();
         }
@@ -400,13 +442,13 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     // WebRTCManager.WebRTCListener callbacks
     @Override
     public void onWebRTCCallEstablished() {
-        Log.i(TAG, "WebRTC call established. Stopping service.");
+        DiagnosticLogger.logInfo(TAG, "Service WebRTC callback onWebRTCCallEstablished() invoked. Terminating active service context.");
         stopSelf();
     }
 
     @Override
     public void onWebRTCCallEnded() {
-        Log.i(TAG, "WebRTC call ended or failed. Stopping service.");
+        DiagnosticLogger.logInfo(TAG, "Service WebRTC callback onWebRTCCallEnded() invoked. Terminating active service context.");
         stopSelf();
     }
 }
