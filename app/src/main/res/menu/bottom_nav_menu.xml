@@ -3,23 +3,23 @@
 
     <item
         android:id="@+id/navigation_home"
-        android:icon="@drawable/ic_home_black_24dp"
+        android:icon="@drawable/home_24px"
         android:title="@string/title_home" />
 
     <item
         android:id="@+id/navigation_contacts"
-        android:icon="@drawable/ic_contacts_black_24dp"
+        android:icon="@drawable/contacts_24px"
         android:title="@string/title_contacts" />
 
     <!-- THIS IS THE NEW ITEM YOU ARE ADDING -->
     <item
         android:id="@+id/navigation_profile"
-        android:icon="@drawable/ic_profile_black_24dp"
+        android:icon="@drawable/man_24px"
         android:title="@string/title_profile" />
 
     <item
         android:id="@+id/navigation_settings"
-        android:icon="@drawable/ic_settings_black_24dp"
+        android:icon="@drawable/settings_24px"
         android:title="@string/title_settings" />
 
 </menu>
