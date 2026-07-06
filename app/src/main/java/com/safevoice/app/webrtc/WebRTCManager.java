@@ -1,6 +1,7 @@
 package com.safevoice.app.webrtc;
 
 import android.content.Context;
+import android.media.AudioManager;
 import android.os.Build;
 import android.util.Log;
 
@@ -20,6 +21,8 @@ import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RtpReceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
+
+import com.safevoice.app.utils.DiagnosticLogger;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -49,6 +52,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     private PeerConnection peerConnection;
     private AudioSource audioSource;
     private AudioTrack localAudioTrack;
+    private final AudioManager audioManager;
 
     private String targetUserUid;
     private final WebRTCListener listener;
@@ -64,9 +68,11 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     public WebRTCManager(Context context, WebRTCListener listener) {
         this.context = context;
         this.listener = listener;
+        this.audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
         this.signalingClient = new FirebaseSignalingClient();
         this.signalingClient.setListener(this);
         initializePeerConnectionFactory();
+        DiagnosticLogger.logInfo(TAG, "WebRTCManager initialized. System AudioManager fetched successfully.");
     }
 
     // --- THIS IS THE FIX ---
@@ -76,24 +82,31 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     }
 
     private void initializePeerConnectionFactory() {
-        PeerConnectionFactory.InitializationOptions initializationOptions = PeerConnectionFactory.InitializationOptions.builder(context)
-                .createInitializationOptions();
-        PeerConnectionFactory.initialize(initializationOptions);
+        try {
+            PeerConnectionFactory.InitializationOptions initializationOptions = PeerConnectionFactory.InitializationOptions.builder(context)
+                    .createInitializationOptions();
+            PeerConnectionFactory.initialize(initializationOptions);
 
-        PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
-        peerConnectionFactory = PeerConnectionFactory.builder()
-                .setOptions(options)
-                .createPeerConnectionFactory();
+            PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
+            peerConnectionFactory = PeerConnectionFactory.builder()
+                    .setOptions(options)
+                    .createPeerConnectionFactory();
+            DiagnosticConnectionLog("Native PeerConnectionFactory initialized successfully.");
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Fatal error initializing Native PeerConnectionFactory libraries.", e);
+        }
     }
 
     public void startCall(String targetUserUid) {
         this.targetUserUid = targetUserUid;
+        DiagnosticLogger.logInfo(TAG, "startCall() triggered. Initiating Twilio REST handshake.");
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
+            DiagnosticLogger.logInfo(TAG, "Twilio handshake completed. Building caller PeerConnection constraints.");
             this.peerConnection = createPeerConnection();
             if (this.peerConnection == null) {
-                Log.e(TAG, "PeerConnection creation failed.");
+                DiagnosticLogger.logError(TAG, "Aborting startCall(). PeerConnection creation returned null.", null);
                 return;
             }
 
@@ -102,17 +115,17 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
             peerConnection.createOffer(new SdpObserver() {
                 @Override
                 public void onCreateSuccess(SessionDescription sessionDescription) {
-                    Log.d(TAG, "Offer created successfully.");
+                    DiagnosticLogger.logInfo(TAG, "WebRTC SDP Offer created successfully. Applying local description.");
                     peerConnection.setLocalDescription(new SdpObserver() {
                         @Override
                         public void onSetSuccess() {
-                            Log.d(TAG, "Local description set successfully for offer.");
+                            DiagnosticLogger.logInfo(TAG, "Local description set successfully for SDP Offer. Dispatched to signaling database.");
                             signalingClient.sendOffer(sessionDescription, targetUserUid);
                         }
                         @Override
                         public void onCreateSuccess(SessionDescription sdp) {}
                         @Override
-                        public void onSetFailure(String s) { Log.e(TAG, "Failed to set local description for offer: " + s); }
+                        public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply local description for offer: " + s, null); }
                         @Override
                         public void onCreateFailure(String s) {}
                     }, sessionDescription);
@@ -120,7 +133,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                 @Override
                 public void onSetSuccess() {}
                 @Override
-                public void onCreateFailure(String s) { Log.e(TAG, "Failed to create offer: " + s); }
+                public void onCreateFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to create active SDP Offer: " + s, null); }
                 @Override
                 public void onSetFailure(String s) {}
             }, new MediaConstraints());
@@ -129,13 +142,15 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     public void answerCall(String sessionId, String callerUid) {
         this.targetUserUid = callerUid;
+        DiagnosticLogger.logInfo(TAG, "answerCall() triggered. Joining signaling session: " + sessionId);
         this.signalingClient.joinCallSession(sessionId);
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
+            DiagnosticLogger.logInfo(TAG, "Twilio handshake completed. Building callee PeerConnection constraints.");
             this.peerConnection = createPeerConnection();
             if (this.peerConnection == null) {
-                Log.e(TAG, "PeerConnection creation failed.");
+                DiagnosticLogger.logError(TAG, "Aborting answerCall(). PeerConnection creation returned null.", null);
                 return;
             }
             createAndSetLocalAudioTrack();
@@ -149,6 +164,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     private void fetchTwilioTokens(Runnable onComplete) {
         synchronized (twilioIceServers) {
             if (!twilioIceServers.isEmpty()) {
+                DiagnosticLogger.logInfo(TAG, "Using cached Twilio ICE Server configuration list.");
                 onComplete.run();
                 return;
             }
@@ -171,13 +187,13 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
             apiKey = sharedPreferences.getString("API_KEY", null);
             apiSecret = sharedPreferences.getString("API_SECRET", null);
         } catch (GeneralSecurityException | IOException e) {
-            Log.e(TAG, "Could not load saved Twilio credentials", e);
+            DiagnosticLogger.logError(TAG, "Failed to read Twilio credentials from EncryptedSharedPreferences.", e);
         }
 
         if (accountSid == null || accountSid.isEmpty() ||
             apiKey == null || apiKey.isEmpty() ||
             apiSecret == null || apiSecret.isEmpty()) {
-            Log.w(TAG, "Twilio credentials not found. Proceeding with standard STUN fallback.");
+            DiagnosticLogger.logWarn(TAG, "Twilio credentials are not configured in settings. WebRTC falling back to standard STUN routing.");
             onComplete.run();
             return;
         }
@@ -185,6 +201,8 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         final String finalAccountSid = accountSid;
         final String finalApiKey = apiKey;
         final String finalApiSecret = apiSecret;
+
+        DiagnosticLogger.logInfo(TAG, "Initiating dynamic REST handshake with Twilio Endpoint.");
 
         new Thread(() -> {
             try {
@@ -216,10 +234,10 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                         parseTwilioResponse(sb.toString());
                     }
                 } else {
-                    Log.e(TAG, "Twilio Token API error response code: " + responseCode);
+                    DiagnosticLogger.logError(TAG, "Twilio Token API handshake failed. Server response code: " + responseCode, null);
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Failed to connect to Twilio Network Traversal API", e);
+                DiagnosticLogger.logError(TAG, "Exception encountered during Twilio network handshake.", e);
             } finally {
                 // Ensure callback execution returns safely to the Main UI Thread
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(onComplete);
@@ -272,10 +290,10 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                     twilioIceServers.clear();
                     twilioIceServers.addAll(parsedList);
                 }
-                Log.d(TAG, "Dynamic Twilio ICE Server Configuration populated. Total servers: " + parsedList.size());
+                DiagnosticLogger.logInfo(TAG, "Dynamic Twilio ICE Server Configuration populated. Total servers: " + parsedList.size());
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing Twilio API response payload", e);
+            DiagnosticLogger.logError(TAG, "Error parsing Twilio API response payload.", e);
         }
     }
 
@@ -288,9 +306,9 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         synchronized (twilioIceServers) {
             if (!twilioIceServers.isEmpty()) {
                 iceServers.addAll(twilioIceServers);
-                Log.d(TAG, "Added Twilio dynamic relay endpoints to client config.");
+                DiagnosticLogger.logInfo(TAG, "Added " + twilioIceServers.size() + " Twilio dynamic ICE relay endpoints to configuration.");
             } else {
-                Log.w(TAG, "Twilio configuration list empty. Falling back to default P2P STUN.");
+                DiagnosticLogger.logWarn(TAG, "Twilio configuration list empty. Falling back to default P2P STUN routing.");
             }
         }
 
@@ -298,14 +316,17 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         return peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override
             public void onSignalingChange(PeerConnection.SignalingState signalingState) {
-                Log.d(TAG, "onSignalingChange: " + signalingState);
+                DiagnosticLogger.logInfo(TAG, "onSignalingChange: " + signalingState);
             }
             @Override
             public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
-                Log.d(TAG, "onIceConnectionChange: " + iceConnectionState);
+                DiagnosticLogger.logInfo(TAG, "onIceConnectionChange: " + iceConnectionState);
                 if (iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
+                    DiagnosticLogger.logInfo(TAG, "ICE Link Established. Routing VoIP audio to system speakerphone.");
+                    setupAudioRouting();
                     listener.onWebRTCCallEstablished();
                 } else if (iceConnectionState == PeerConnection.IceConnectionState.FAILED || iceConnectionState == PeerConnection.IceConnectionState.DISCONNECTED) {
+                    DiagnosticLogger.logWarn(TAG, "ICE Link Disconnected or Failed. Terminating call session.");
                     endCall();
                 }
             }
@@ -313,11 +334,11 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
             public void onIceConnectionReceivingChange(boolean b) {}
             @Override
             public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {
-                Log.d(TAG, "onIceGatheringChange: " + iceGatheringState);
+                DiagnosticLogger.logInfo(TAG, "onIceGatheringChange: " + iceGatheringState);
             }
             @Override
             public void onIceCandidate(IceCandidate iceCandidate) {
-                Log.d(TAG, "onIceCandidate: sending candidate");
+                DiagnosticLogger.logInfo(TAG, "Local ICE Candidate gathered. Forwarding candidate to remote peer.");
                 signalingClient.sendIceCandidate(iceCandidate, targetUserUid);
             }
             @Override
@@ -332,26 +353,62 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
             public void onRenegotiationNeeded() {}
             @Override
             public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {
-                Log.d(TAG, "Remote audio track received.");
+                DiagnosticLogger.logInfo(TAG, "Remote audio track stream successfully matched and received.");
             }
         });
     }
 
+    private void setupAudioRouting() {
+        try {
+            if (audioManager != null) {
+                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                audioManager.setSpeakerphoneOn(true); // Default to speakerphone for hands-free convenience
+                audioManager.setMicrophoneMute(false);
+                DiagnosticLogger.logInfo(TAG, "System AudioManager set to MODE_IN_COMMUNICATION. Speakerphone turned ON.");
+            }
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Failed to apply system AudioManager VoIP parameters.", e);
+        }
+    }
+
+    private void resetAudioRouting() {
+        try {
+            if (audioManager != null) {
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+                audioManager.setSpeakerphoneOn(false);
+                DiagnosticLogger.logInfo(TAG, "System AudioManager successfully reset to MODE_NORMAL.");
+            }
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Failed to reset system AudioManager audio routing parameters.", e);
+        }
+    }
+
     private void createAndSetLocalAudioTrack() {
-        audioSource = peerConnectionFactory.createAudioSource(new MediaConstraints());
-        localAudioTrack = peerConnectionFactory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
-        localAudioTrack.setEnabled(true);
-        peerConnection.addTrack(localAudioTrack, Collections.singletonList("stream1"));
+        try {
+            audioSource = peerConnectionFactory.createAudioSource(new MediaConstraints());
+            localAudioTrack = peerConnectionFactory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
+            localAudioTrack.setEnabled(true);
+            peerConnection.addTrack(localAudioTrack, Collections.singletonList("stream1"));
+            DiagnosticConnectionLog("Local audio track successfully acquired, enabled, and bound to stream.");
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Failed to allocate local audio capture hardware.", e);
+        }
     }
 
     public void endCall() {
+        DiagnosticLogger.logInfo(TAG, "endCall() triggered. Tearing down PeerConnection and resetting audio states.");
+        
+        resetAudioRouting();
+
         if (peerConnection != null) {
             peerConnection.close();
             peerConnection = null;
+            DiagnosticLogger.logInfo(TAG, "PeerConnection successfully closed.");
         }
         if (audioSource != null) {
             audioSource.dispose();
             audioSource = null;
+            DiagnosticLogger.logInfo(TAG, "AudioSource successfully disposed.");
         }
         signalingClient.endCall();
     }
@@ -359,26 +416,26 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     // FirebaseSignalingClient.SignalingListener methods
     @Override
     public void onOfferReceived(SessionDescription sessionDescription) {
-        Log.d(TAG, "Offer received.");
+        DiagnosticLogger.logInfo(TAG, "onOfferReceived() invoked. Applying remote description and creating SDP Answer.");
         if (peerConnection != null) {
             peerConnection.setRemoteDescription(new SdpObserver() {
                 @Override
                 public void onSetSuccess() {
-                    Log.d(TAG, "Remote description set for offer.");
+                    DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Offer. Creating SDP Answer.");
                     peerConnection.createAnswer(new SdpObserver() {
                         @Override
                         public void onCreateSuccess(SessionDescription answerSdp) {
-                            Log.d(TAG, "Answer created successfully.");
+                            DiagnosticLogger.logInfo(TAG, "WebRTC SDP Answer created successfully. Applying local description.");
                             peerConnection.setLocalDescription(new SdpObserver() {
                                 @Override
                                 public void onSetSuccess() {
-                                    Log.d(TAG, "Local description set for answer.");
+                                    DiagnosticLogger.logInfo(TAG, "Local description set successfully for Answer. Dispatched to signaling database.");
                                     signalingClient.sendAnswer(answerSdp, targetUserUid);
                                 }
                                 @Override
                                 public void onCreateSuccess(SessionDescription sdp) {}
                                 @Override
-                                public void onSetFailure(String s) { Log.e(TAG, "Failed to set local description for answer: " + s); }
+                                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply local description for answer: " + s, null); }
                                 @Override
                                 public void onCreateFailure(String s) {}
                             }, answerSdp);
@@ -386,7 +443,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                         @Override
                         public void onSetSuccess() {}
                         @Override
-                        public void onCreateFailure(String s) { Log.e(TAG, "Failed to create answer: " + s); }
+                        public void onCreateFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to create dynamic SDP Answer: " + s, null); }
                         @Override
                         public void onSetFailure(String s) {}
                     }, new MediaConstraints());
@@ -394,7 +451,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {}
                 @Override
-                public void onSetFailure(String s) { Log.e(TAG, "Failed to set remote description for offer: " + s); }
+                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for offer: " + s, null); }
                 @Override
                 public void onCreateFailure(String s) {}
             }, sessionDescription);
@@ -403,17 +460,17 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     @Override
     public void onAnswerReceived(SessionDescription sessionDescription) {
-        Log.d(TAG, "Answer received.");
+        DiagnosticLogger.logInfo(TAG, "onAnswerReceived() invoked. Applying remote description.");
         if (peerConnection != null) {
             peerConnection.setRemoteDescription(new SdpObserver() {
                 @Override
                 public void onSetSuccess() {
-                    Log.d(TAG, "Remote description set for answer.");
+                    DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Answer. P2P channel ready.");
                 }
                 @Override
                 public void onCreateSuccess(SessionDescription sdp) {}
                 @Override
-                public void onSetFailure(String s) { Log.e(TAG, "Failed to set remote description for answer: " + s); }
+                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for answer: " + s, null); }
                 @Override
                 public void onCreateFailure(String s) {}
             }, sessionDescription);
@@ -422,7 +479,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     @Override
     public void onIceCandidateReceived(IceCandidate iceCandidate) {
-        Log.d(TAG, "ICE candidate received.");
+        DiagnosticLogger.logInfo(TAG, "onIceCandidateReceived() invoked. Binding remote candidate to local PeerConnection.");
         if (peerConnection != null) {
             peerConnection.addIceCandidate(iceCandidate);
         }
@@ -430,18 +487,35 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     @Override
     public void onCallEnded() {
-        Log.d(TAG, "Call ended signal received.");
+        DiagnosticLogger.logInfo(TAG, "onCallEnded() signaling event received. Propagating callback to active listener.");
         if (listener != null) {
             listener.onWebRTCCallEnded();
         }
     }
 
+    /**
+     * Systematically closes peer connection and disposes factory contexts on a dedicated worker thread.
+     * This avoids deadlocks or native crashes on the main thread (essential for Glitch 2).
+     */
     public void cleanup() {
-        endCall();
-        if (peerConnectionFactory != null) {
-            peerConnectionFactory.dispose();
-            peerConnectionFactory = null;
-        }
-        PeerConnectionFactory.shutdownInternalTracer();
+        new Thread(() -> {
+            try {
+                DiagnosticLogger.logInfo(TAG, "Native resource cleanup initiated on worker thread.");
+                endCall();
+                if (peerConnectionFactory != null) {
+                    peerConnectionFactory.dispose();
+                    peerConnectionFactory = null;
+                    DiagnosticLogger.logInfo(TAG, "PeerConnectionFactory successfully disposed on worker thread.");
+                }
+                PeerConnectionFactory.shutdownInternalTracer();
+                DiagnosticLogger.logInfo(TAG, "Native resource cleanup successfully finalized.");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Exception encountered during background native resource cleanup.", e);
+            }
+        }).start();
+    }
+
+    private void DiagnosticConnectionLog(String message) {
+        DiagnosticLogger.logInfo(TAG, message);
     }
 }
