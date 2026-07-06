@@ -39,6 +39,9 @@ public class FirebaseSignalingClient {
     private ValueEventListener iceCandidateListener;
     private ValueEventListener sessionListener;
 
+    // Track roles to implement robust, unidirectional signaling routes and prevent self-subscription bugs
+    private boolean isCaller = false;
+
     public interface SignalingListener {
         void onOfferReceived(SessionDescription sessionDescription);
         void onAnswerReceived(SessionDescription sessionDescription);
@@ -68,6 +71,7 @@ public class FirebaseSignalingClient {
     }
 
     public void createCallSession(String targetUserUid) {
+        this.isCaller = true;
         // A unique session ID is created by the caller
         this.callSessionRef = database.getReference(CALL_SESSIONS_NODE).push();
         DiagnosticLogger.logInfo(TAG, "Created new Call Session node in RTDB at path: " + callSessionRef.getPath());
@@ -75,6 +79,7 @@ public class FirebaseSignalingClient {
     }
 
     public void joinCallSession(String sessionId) {
+        this.isCaller = false;
         this.callSessionRef = database.getReference(CALL_SESSIONS_NODE).child(sessionId);
         DiagnosticLogger.logInfo(TAG, "Joining existing Call Session ID: " + sessionId + " at path: " + callSessionRef.getPath());
         
@@ -96,7 +101,7 @@ public class FirebaseSignalingClient {
     }
 
     private void listenForSignals(String remoteUserUid) {
-        DiagnosticLogger.logInfo(TAG, "Subscribing signaling listeners for remote UID: " + remoteUserUid);
+        DiagnosticLogger.logInfo(TAG, "Subscribing signaling listeners. Current role isCaller: " + isCaller + ", Remote user: " + remoteUserUid);
 
         // 1. Listener for session lifecycle changes (essential to solve Glitch 2)
         sessionListener = new ValueEventListener() {
@@ -125,7 +130,7 @@ public class FirebaseSignalingClient {
             }
         };
 
-        // 2. Listener for offer or answer SDP signals
+        // 2. Listener for SDP signals
         offerListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -186,33 +191,38 @@ public class FirebaseSignalingClient {
             }
         };
 
+        // Caller listens to remote answers and callee's ICE candidates
+        // Callee listens to remote offers and caller's ICE candidates
+        String sdpNodeName = isCaller ? "answer" : "offer";
+        String iceNodeName = isCaller ? "callee_ice" : "caller_ice";
+
         callSessionRef.addValueEventListener(sessionListener);
-        callSessionRef.child(remoteUserUid).addValueEventListener(offerListener);
-        callSessionRef.child(remoteUserUid + "_ice").addValueEventListener(iceCandidateListener);
+        callSessionRef.child(sdpNodeName).addValueEventListener(offerListener);
+        callSessionRef.child(iceNodeName).addValueEventListener(iceCandidateListener);
     }
 
     public void sendOffer(SessionDescription sdp, String targetUserUid) {
         if (callSessionRef == null) {
             createCallSession(targetUserUid);
         }
-        DiagnosticLogger.logInfo(TAG, "Sending SDP Offer to target user: " + targetUserUid);
+        DiagnosticLogger.logInfo(TAG, "Sending SDP Offer to target session root.");
         Map<String, Object> offerData = new HashMap<>();
         offerData.put("type", "offer");
         offerData.put("sdp", sdp.description);
 
         callSessionRef.child("callerUid").setValue(currentUserUid);
-        callSessionRef.child(targetUserUid).setValue(offerData)
+        callSessionRef.child("offer").setValue(offerData)
                 .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "SDP Offer uploaded successfully."))
                 .addOnFailureListener(e -> DiagnosticLogger.logError(TAG, "Failed to upload SDP Offer.", e));
     }
 
     public void sendAnswer(SessionDescription sdp, String targetUserUid) {
-        DiagnosticLogger.logInfo(TAG, "Sending SDP Answer to target user: " + targetUserUid);
+        DiagnosticLogger.logInfo(TAG, "Sending SDP Answer to target session root.");
         Map<String, Object> answerData = new HashMap<>();
         answerData.put("type", "answer");
         answerData.put("sdp", sdp.description);
         
-        callSessionRef.child(targetUserUid).setValue(answerData)
+        callSessionRef.child("answer").setValue(answerData)
                 .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "SDP Answer uploaded successfully."))
                 .addOnFailureListener(e -> DiagnosticLogger.logError(TAG, "Failed to upload SDP Answer.", e));
     }
@@ -224,10 +234,12 @@ public class FirebaseSignalingClient {
         }
         Map<String, Object> candidateData = new HashMap<>();
         candidateData.put("sdpMid", iceCandidate.sdpMid);
-        candidateData.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
+        candidateData.put("sdpMLineIndex", iceCandidate.iceCandidate.sdpMLineIndex); // Explicit IceCandidate inner property
         candidateData.put("sdp", iceCandidate.sdp);
 
-        callSessionRef.child(targetUserUid + "_ice").push().setValue(candidateData);
+        // Caller uploads to caller_ice; callee uploads to callee_ice
+        String iceNodeName = isCaller ? "caller_ice" : "callee_ice";
+        callSessionRef.child(iceNodeName).push().setValue(candidateData);
     }
 
     public void endCall() {
@@ -240,11 +252,13 @@ public class FirebaseSignalingClient {
                 sessionListener = null;
             }
             if (offerListener != null) {
-                callSessionRef.removeEventListener(offerListener);
+                String sdpNodeName = isCaller ? "answer" : "offer";
+                callSessionRef.child(sdpNodeName).removeEventListener(offerListener);
                 offerListener = null;
             }
             if (iceCandidateListener != null) {
-                callSessionRef.removeEventListener(iceCandidateListener);
+                String iceNodeName = isCaller ? "callee_ice" : "caller_ice";
+                callSessionRef.child(iceNodeName).removeEventListener(iceCandidateListener);
                 iceCandidateListener = null;
             }
             
