@@ -3,6 +3,8 @@ package com.safevoice.app;
 import android.app.Application;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+
 import com.safevoice.app.firebase.FirebaseManager;
 import com.safevoice.app.utils.DiagnosticLogger;
 
