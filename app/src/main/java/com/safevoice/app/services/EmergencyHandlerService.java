@@ -43,12 +43,12 @@ import com.safevoice.app.utils.ContactsManager;
 import com.safevoice.app.utils.DiagnosticLogger;
 import com.safevoice.app.utils.LocationHelper;
 import com.safevoice.app.webrtc.WebRTCCallActivity;
-import com.safevoice.app.webrtc.WebRTCManager;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Service that handles the emergency sequence when triggered.
@@ -56,7 +56,7 @@ import java.util.Map;
  * SMS warning layouts are dispatched first, and then online FCM and Realtime Database
  * signalling routes are triggered over the custom "safe_voice_circle" database structure.
  */
-public class EmergencyHandlerService extends Service implements WebRTCManager.WebRTCListener {
+public class EmergencyHandlerService extends Service {
 
     private static final String TAG = "EmergencyHandlerService";
     private static final String SETTINGS_PREFS_NAME = "SafeVoiceSettingsPrefs";
@@ -64,14 +64,12 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     private static final String CALL_PREF_WEBRTC = "webrtc";
 
     private LocationHelper locationHelper;
-    private WebRTCManager webRTCManager;
 
     @Override
     public void onCreate() {
         super.onCreate();
         DiagnosticLogger.logInfo(TAG, "EmergencyHandlerService onCreate() invoked. Initializing helpers.");
         locationHelper = new LocationHelper(this);
-        webRTCManager = new WebRTCManager(getApplicationContext(), this);
     }
 
     @Override
@@ -80,7 +78,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         Toast.makeText(this, "Emergency Triggered! Sending alerts...", Toast.LENGTH_LONG).show();
 
         if (!hasRequiredPermissions()) {
-            DiagnosticLogger.logError(TAG, "Execution aborted. Missing critical location, call, or SMS permissions.");
+            DiagnosticLogger.logError(TAG, "Execution aborted. Missing critical location, call, or SMS permissions.", null);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -91,7 +89,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                 if (location != null) {
                     DiagnosticLogger.logInfo(TAG, "GPS location resolved successfully: Latitude " + location.getLatitude() + ", Longitude " + location.getLongitude());
                 } else {
-                    DiagnosticLogger.logWarn(TAG, "GPS location returned null. Attempting emergency action dispatcher with null location fallback.");
+                    DiagnosticLogger.logWarn(TAG, "GPS location returned null. Attempting emergency actions dispatcher with null location fallback.");
                 }
                 executeEmergencyActions(location);
             }
@@ -112,12 +110,11 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         String callPreference = settingsPrefs.getString(KEY_CALL_PREFERENCE, "standard");
         DiagnosticLogger.logInfo(TAG, "Active calling preference resolved: " + callPreference);
 
-        // Generate the signaling session ID first, so it gets injected into the FCM/Realtime Alerts correctly
+        // Generate a secure, unique signaling session ID synchronously to prevent async latency bugs
+        String sessionId = null;
         if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
-            if (webRTCManager != null) {
-                DiagnosticLogger.logInfo(TAG, "WebRTC preference active. Generating dynamic signaling session ID on RTDB before alert dispatch.");
-                webRTCManager.startCall(primaryContact.getUid());
-            }
+            sessionId = UUID.randomUUID().toString();
+            DiagnosticLogger.logInfo(TAG, "WebRTC preference active. Synchronously generated Session ID: " + sessionId);
         }
 
         // Send SMS to the primary contact
@@ -144,11 +141,11 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         if (isOnline()) {
             DiagnosticLogger.logInfo(TAG, "Network connection detected. Executing advanced online alerts strategy.");
 
-            // Send in-app FCM alerts to priority contacts (they will now receive the generated session ID)
-            sendFcmAlertsToAll(priorityContacts, location);
+            // Send in-app FCM alerts to priority contacts containing the actual synchronous session ID
+            sendFcmAlertsToAll(priorityContacts, location, sessionId);
 
             if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
-                startWebRtcCall(primaryContact.getUid());
+                startWebRtcCall(primaryContact.getUid(), sessionId);
             } else {
                 DiagnosticLogger.logInfo(TAG, "Making standard fallback cellular call as per settings preference.");
                 makeStandardPhoneCall(primaryContact);
@@ -169,7 +166,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         }
     }
 
-    private void startWebRtcCall(String targetUid) {
+    private void startWebRtcCall(String targetUid, String sessionId) {
         FirebaseApp circleApp;
         try {
             circleApp = FirebaseApp.getInstance("safe_voice_circle");
@@ -178,8 +175,6 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         }
 
         String myUid = FirebaseAuth.getInstance(circleApp).getCurrentUser().getUid();
-        String sessionId = (webRTCManager != null && webRTCManager.getSignalingClient() != null) ? 
-                webRTCManager.getSignalingClient().getSessionId() : null;
 
         DiagnosticLogger.logInfo(TAG, "Launching WebRTC Calling UI for caller. Session ID: " + sessionId + ", Target UID: " + targetUid);
 
@@ -257,7 +252,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
         }
     }
 
-    private void sendFcmAlertsToAll(List<Contact> contacts, Location location) {
+    private void sendFcmAlertsToAll(List<Contact> contacts, Location location, String sessionId) {
         FirebaseApp circleApp;
         try {
             circleApp = FirebaseApp.getInstance("safe_voice_circle");
@@ -288,11 +283,11 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
 
                         for (Contact contact : contacts) {
                             if (contact.getUid() != null) {
-                                // 1. Send the standard FCM message
-                                sendFcmMessage(contact.getUid(), callerName, currentUser.getUid(), location, dynamicDb);
+                                // 1. Send the standard FCM message containing the session ID
+                                sendFcmMessage(contact.getUid(), callerName, currentUser.getUid(), location, sessionId, dynamicDb);
                                 
-                                // 2. Send the instant real-time database signaling trigger
-                                sendRealtimeDbAlert(circleApp, contact.getUid(), callerName, currentUser.getUid(), location);
+                                // 2. Send the instant real-time database signaling trigger containing the session ID
+                                sendRealtimeDbAlert(circleApp, contact.getUid(), callerName, currentUser.getUid(), location, sessionId);
                             }
                         }
                     } else {
@@ -302,7 +297,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
             });
     }
 
-    private void sendFcmMessage(String recipientUid, String callerName, String callerUid, Location location, FirebaseFirestore dynamicDb) {
+    private void sendFcmMessage(String recipientUid, String callerName, String callerUid, Location location, String sessionId, FirebaseFirestore dynamicDb) {
         dynamicDb.collection("users").document(recipientUid).get()
             .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
                 @Override
@@ -320,8 +315,8 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                                 messageBuilder.addData("location", location.getLatitude() + "," + location.getLongitude());
                             }
 
-                            if (webRTCManager != null && webRTCManager.getSignalingClient().getSessionId() != null) {
-                                messageBuilder.addData("sessionId", webRTCManager.getSignalingClient().getSessionId());
+                            if (sessionId != null) {
+                                messageBuilder.addData("sessionId", sessionId);
                             }
 
                             FirebaseMessaging.getInstance().send(messageBuilder.build());
@@ -340,7 +335,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
      * Writes the emergency trigger payload directly to the shared Realtime Database.
      * This bypasses local client-to-client FCM limits and wakes up the recipient's phone instantly.
      */
-    private void sendRealtimeDbAlert(FirebaseApp circleApp, String recipientUid, String callerName, String callerUid, Location location) {
+    private void sendRealtimeDbAlert(FirebaseApp circleApp, String recipientUid, String callerName, String callerUid, Location location, String sessionId) {
         try {
             FirebaseDatabase rtdb = FirebaseDatabase.getInstance(circleApp);
             DatabaseReference alertsRef = rtdb.getReference("alerts").child(recipientUid);
@@ -355,13 +350,13 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
                 alertPayload.put("location", "0.0,0.0");
             }
 
-            if (webRTCManager != null && webRTCManager.getSignalingClient().getSessionId() != null) {
-                alertPayload.put("sessionId", webRTCManager.getSignalingClient().getSessionId());
+            if (sessionId != null) {
+                alertPayload.put("sessionId", sessionId);
             } else {
                 alertPayload.put("sessionId", "pending");
             }
 
-            DiagnosticLogger.logInfo(TAG, "Uploading real-time database trigger payload to path: " + alertsRef.getPath());
+            DiagnosticLogger.logInfo(TAG, "Uploading real-time database trigger payload containing Session ID: " + sessionId + " to path: " + alertsRef.getPath());
 
             alertsRef.setValue(alertPayload)
                     .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "Realtime DB Alert written successfully for recipient: " + recipientUid))
@@ -432,23 +427,7 @@ public class EmergencyHandlerService extends Service implements WebRTCManager.We
     @Override
     public void onDestroy() {
         super.onDestroy();
-        DiagnosticLogger.logInfo(TAG, "EmergencyHandlerService onDestroy() invoked. Tearing down active managers.");
-        if (webRTCManager != null) {
-            webRTCManager.cleanup();
-        }
-        Log.d(TAG, "EmergencyHandlerService destroyed.");
-    }
-
-    // WebRTCManager.WebRTCListener callbacks
-    @Override
-    public void onWebRTCCallEstablished() {
-        DiagnosticLogger.logInfo(TAG, "Service WebRTC callback onWebRTCCallEstablished() invoked. Terminating active service context.");
-        stopSelf();
-    }
-
-    @Override
-    public void onWebRTCCallEnded() {
-        DiagnosticLogger.logInfo(TAG, "Service WebRTC callback onWebRTCCallEnded() invoked. Terminating active service context.");
+        DiagnosticLogger.logInfo(TAG, "EmergencyHandlerService onDestroy() invoked. Tearing down active task resources.");
         stopSelf();
     }
 }
