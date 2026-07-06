@@ -50,17 +50,17 @@
         android:layout_alignParentBottom="true"
         android:layout_marginBottom="48dp">
 
-        <!-- Microphone Mute/Unmute Toggle Button -->
+        <!-- Microphone Mute/Unmute Toggle Button (Uses selector to switch between mic/mic_off) -->
         <ImageButton
             android:id="@+id/buttonMute"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_btn_speak_now"
+            android:src="@drawable/selector_mic_toggle"
             android:contentDescription="Mute Microphone"
             android:layout_marginEnd="32dp" />
 
-        <!-- End Call / Hang Up Button (Red Circular Button) -->
+        <!-- End Call / Hang Up Button (Red Circular Button, uses call_end_24px) -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/buttonHangUp"
             android:layout_width="72dp"
@@ -69,20 +69,20 @@
             android:insetBottom="0dp"
             app:cornerRadius="36dp"
             app:backgroundTint="#D32F2F"
-            app:icon="@android:drawable/ic_menu_close_clear_cancel"
+            app:icon="@drawable/call_end_24px"
             app:iconSize="32dp"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
             app:iconTint="#FFFFFF"
             android:contentDescription="End Call" />
 
-        <!-- Speakerphone Toggle Button -->
+        <!-- Speakerphone Toggle Button (Uses selector to switch between speaker_phone/volume_mute) -->
         <ImageButton
             android:id="@+id/buttonSpeaker"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_lock_silent_mode_off"
+            android:src="@drawable/selector_speaker_toggle"
             android:contentDescription="Toggle Speaker"
             android:layout_marginStart="32dp" />
 
