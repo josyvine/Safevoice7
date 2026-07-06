@@ -15,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.safevoice.app.databinding.ActivityWebrtcCallBinding;
 import com.safevoice.app.services.VoiceRecognitionService;
+import com.safevoice.app.utils.DiagnosticLogger;
 
 import java.util.Locale;
 
@@ -57,6 +58,8 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        DiagnosticLogger.logInfo(TAG, "Activity onCreate() invoked. Preparing fullscreen WebRTC dashboard.");
+        
         binding = ActivityWebrtcCallBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
@@ -77,6 +80,9 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
         callerUid = intent.getStringExtra("CALLER_UID");
         recipientUid = intent.getStringExtra("RECIPIENT_UID");
 
+        DiagnosticLogger.logInfo(TAG, "Call Intent Metadata -> Is Outgoing: " + isOutgoing + 
+                ", Session ID: " + sessionId + ", Caller UID: " + callerUid + ", Recipient UID: " + recipientUid);
+
         // Stop background sirens immediately once call is opened
         VoiceRecognitionService.stopServiceAlarm();
 
@@ -85,24 +91,28 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
     }
 
     private void initializeCall() {
-        // Initialize the WebRTCManager context
+        DiagnosticLogger.logInfo(TAG, "Initializing active WebRTC session manager context.");
         webRTCManager = new WebRTCManager(getApplicationContext(), this);
 
         if (isOutgoing) {
             binding.textCallStatus.setText("Calling Family Circle...");
+            DiagnosticLogger.logInfo(TAG, "Outgoing connection request initiated for target UID: " + recipientUid);
             // Start WebRTC connection peer constraints
             if (recipientUid != null) {
                 webRTCManager.startCall(recipientUid);
             } else {
+                DiagnosticLogger.logError(TAG, "Failed to start call. Recipient target UID is null.", null);
                 Toast.makeText(this, "No recipient target available.", Toast.LENGTH_SHORT).show();
                 finish();
             }
         } else {
             binding.textCallStatus.setText("Connecting Audio...");
+            DiagnosticLogger.logInfo(TAG, "Incoming connection request handshake initiated for Session ID: " + sessionId);
             if (sessionId != null && callerUid != null) {
                 // Join the existing signaling session and send SDP Answer
                 webRTCManager.answerCall(sessionId, callerUid);
             } else {
+                DiagnosticLogger.logError(TAG, "Failed to answer call. Session metadata parameters are null.", null);
                 Toast.makeText(this, "Error: Signaling session missing.", Toast.LENGTH_SHORT).show();
                 finish();
             }
@@ -130,6 +140,12 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
         binding.buttonHangUp.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                // Disable calling controls immediately to prevent native thread deadlocks (Glitch 2)
+                binding.buttonHangUp.setEnabled(false);
+                binding.buttonMute.setEnabled(false);
+                binding.buttonSpeaker.setEnabled(false);
+                
+                DiagnosticLogger.logInfo(TAG, "Hang Up clicked. Controls disabled. Tearing down connection.");
                 hangUpCall();
             }
         });
@@ -137,11 +153,14 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
 
     private void toggleMute() {
         isMuted = !isMuted;
-        // In WebRTC, muting is handled by disabling/enabling the local AudioTrack
-        if (webRTCManager != null) {
-            // Safety check in case elements are disposing
-            Log.d(TAG, "Mute toggled: " + isMuted);
-            // Programmatically toggle state (WebRTC handle exists in WebRTCManager)
+        if (audioManager != null) {
+            try {
+                // Apply direct system-level hardware mute/unmute
+                audioManager.setMicrophoneMute(isMuted);
+                DiagnosticLogger.logInfo(TAG, "Microphone toggled. Hardware mute state: " + isMuted);
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed to apply hardware microphone mute state.", e);
+            }
         }
         binding.buttonMute.setSelected(isMuted);
     }
@@ -149,19 +168,25 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
     private void toggleSpeaker() {
         isSpeakerOn = !isSpeakerOn;
         if (audioManager != null) {
-            audioManager.setSpeakerphoneOn(isSpeakerOn);
-            Log.d(TAG, "Speakerphone toggled: " + isSpeakerOn);
+            try {
+                audioManager.setSpeakerphoneOn(isSpeakerOn);
+                DiagnosticLogger.logInfo(TAG, "Speakerphone toggled. Hardware speakerphone state: " + isSpeakerOn);
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed to apply hardware speakerphone state.", e);
+            }
         }
         binding.buttonSpeaker.setSelected(isSpeakerOn);
     }
 
     private void startTimer() {
+        DiagnosticLogger.logInfo(TAG, "Starting call run-time duration counter.");
         timerHandler.removeCallbacks(timerRunnable);
         secondsElapsed = 0;
         timerHandler.postDelayed(timerRunnable, 1000);
     }
 
     private void stopTimer() {
+        DiagnosticLogger.logInfo(TAG, "Stopping call run-time duration counter.");
         timerHandler.removeCallbacks(timerRunnable);
     }
 
@@ -169,6 +194,7 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
         stopTimer();
         if (webRTCManager != null) {
             webRTCManager.cleanup();
+            webRTCManager = null;
         }
         finish();
     }
@@ -182,15 +208,18 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        DiagnosticLogger.logInfo(TAG, "Activity onDestroy() invoked. Safely releasing remaining active resources.");
         stopTimer();
         if (webRTCManager != null) {
             webRTCManager.cleanup();
+            webRTCManager = null;
         }
     }
 
     // WebRTCManager.WebRTCListener callbacks
     @Override
     public void onWebRTCCallEstablished() {
+        DiagnosticLogger.logInfo(TAG, "onWebRTCCallEstablished() invoked on activity context. Initializing visual UI timers.");
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -198,9 +227,14 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
                 startTimer();
                 // Route audio output to speakerphone automatically for emergency convenience
                 if (audioManager != null) {
-                    audioManager.setSpeakerphoneOn(true);
-                    isSpeakerOn = true;
-                    binding.buttonSpeaker.setSelected(true);
+                    try {
+                        audioManager.setSpeakerphoneOn(true);
+                        isSpeakerOn = true;
+                        binding.buttonSpeaker.setSelected(true);
+                        DiagnosticLogger.logInfo(TAG, "VoIP speakerphone auto-activated for hands-free emergency convenience.");
+                    } catch (Exception e) {
+                        DiagnosticLogger.logError(TAG, "Failed to auto-route audio stream to speakerphone.", e);
+                    }
                 }
             }
         });
@@ -208,6 +242,7 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
 
     @Override
     public void onWebRTCCallEnded() {
+        DiagnosticLogger.logInfo(TAG, "onWebRTCCallEnded() remote signaling event received. Terminating UI.");
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
