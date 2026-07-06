@@ -1,11 +1,14 @@
 package com.safevoice.app.webrtc;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKeys;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
 import org.webrtc.DataChannel;
@@ -18,7 +21,14 @@ import org.webrtc.RtpReceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,6 +52,9 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     private String targetUserUid;
     private final WebRTCListener listener;
+
+    // Cache list to store Twilio TURN servers dynamically fetched from the REST API
+    private final List<PeerConnection.IceServer> twilioIceServers = new ArrayList<>();
 
     public interface WebRTCListener {
         void onWebRTCCallEstablished();
@@ -75,58 +88,76 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     public void startCall(String targetUserUid) {
         this.targetUserUid = targetUserUid;
-        this.peerConnection = createPeerConnection();
-        if (this.peerConnection == null) {
-            Log.e(TAG, "PeerConnection creation failed.");
-            return;
-        }
 
-        createAndSetLocalAudioTrack();
-
-        peerConnection.createOffer(new SdpObserver() {
-            @Override
-            public void onCreateSuccess(SessionDescription sessionDescription) {
-                Log.d(TAG, "Offer created successfully.");
-                peerConnection.setLocalDescription(new SdpObserver() {
-                    @Override
-                    public void onSetSuccess() {
-                        Log.d(TAG, "Local description set successfully for offer.");
-                        signalingClient.sendOffer(sessionDescription, targetUserUid);
-                    }
-                    @Override
-                    public void onCreateSuccess(SessionDescription sdp) {}
-                    @Override
-                    public void onSetFailure(String s) { Log.e(TAG, "Failed to set local description for offer: " + s); }
-                    @Override
-                    public void onCreateFailure(String s) {}
-                }, sessionDescription);
+        // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
+        fetchTwilioTokens(() -> {
+            this.peerConnection = createPeerConnection();
+            if (this.peerConnection == null) {
+                Log.e(TAG, "PeerConnection creation failed.");
+                return;
             }
-            @Override
-            public void onSetSuccess() {}
-            @Override
-            public void onCreateFailure(String s) { Log.e(TAG, "Failed to create offer: " + s); }
-            @Override
-            public void onSetFailure(String s) {}
-        }, new MediaConstraints());
+
+            createAndSetLocalAudioTrack();
+
+            peerConnection.createOffer(new SdpObserver() {
+                @Override
+                public void onCreateSuccess(SessionDescription sessionDescription) {
+                    Log.d(TAG, "Offer created successfully.");
+                    peerConnection.setLocalDescription(new SdpObserver() {
+                        @Override
+                        public void onSetSuccess() {
+                            Log.d(TAG, "Local description set successfully for offer.");
+                            signalingClient.sendOffer(sessionDescription, targetUserUid);
+                        }
+                        @Override
+                        public void onCreateSuccess(SessionDescription sdp) {}
+                        @Override
+                        public void onSetFailure(String s) { Log.e(TAG, "Failed to set local description for offer: " + s); }
+                        @Override
+                        public void onCreateFailure(String s) {}
+                    }, sessionDescription);
+                }
+                @Override
+                public void onSetSuccess() {}
+                @Override
+                public void onCreateFailure(String s) { Log.e(TAG, "Failed to create offer: " + s); }
+                @Override
+                public void onSetFailure(String s) {}
+            }, new MediaConstraints());
+        });
     }
 
     public void answerCall(String sessionId, String callerUid) {
         this.targetUserUid = callerUid;
         this.signalingClient.joinCallSession(sessionId);
-        this.peerConnection = createPeerConnection();
-        if (this.peerConnection == null) {
-            Log.e(TAG, "PeerConnection creation failed.");
-            return;
-        }
-        createAndSetLocalAudioTrack();
+
+        // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
+        fetchTwilioTokens(() -> {
+            this.peerConnection = createPeerConnection();
+            if (this.peerConnection == null) {
+                Log.e(TAG, "PeerConnection creation failed.");
+                return;
+            }
+            createAndSetLocalAudioTrack();
+        });
     }
 
-    private PeerConnection createPeerConnection() {
-        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
-        // Add Google's public STUN server
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
+    /**
+     * Authenticates with Twilio over HTTP and retrieves dynamic network traversal tokens on a worker thread.
+     * Always triggers the completion callback on the Main UI thread.
+     */
+    private void fetchTwilioTokens(Runnable onComplete) {
+        synchronized (twilioIceServers) {
+            if (!twilioIceServers.isEmpty()) {
+                onComplete.run();
+                return;
+            }
+        }
 
-        // Add custom TURN servers from EncryptedSharedPreferences if available
+        String accountSid = null;
+        String apiKey = null;
+        String apiSecret = null;
+
         try {
             String masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC);
             EncryptedSharedPreferences sharedPreferences = (EncryptedSharedPreferences) EncryptedSharedPreferences.create(
@@ -136,21 +167,131 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             );
-            String accountSid = sharedPreferences.getString("ACCOUNT_SID", null);
-            String apiKey = sharedPreferences.getString("API_KEY", null);
-            String apiSecret = sharedPreferences.getString("API_SECRET", null);
-
-            if (accountSid != null && apiKey != null && apiSecret != null) {
-                // In a real app, you would use these credentials to fetch TURN server info from Twilio's API.
-                // For this example, we'll log that we have them. A real implementation is complex.
-                Log.i(TAG, "Twilio credentials found. In a real app, fetch TURN servers here.");
-                // Example of how you would add a TURN server if you had the URI/user/pass
-                // iceServers.add(PeerConnection.IceServer.builder("turn:your-turn-server.com")
-                //         .setUsername("user").setPassword("pass").createIceServer());
-            }
-
+            accountSid = sharedPreferences.getString("ACCOUNT_SID", null);
+            apiKey = sharedPreferences.getString("API_KEY", null);
+            apiSecret = sharedPreferences.getString("API_SECRET", null);
         } catch (GeneralSecurityException | IOException e) {
-            Log.e(TAG, "Could not read EncryptedSharedPreferences", e);
+            Log.e(TAG, "Could not load saved Twilio credentials", e);
+        }
+
+        if (accountSid == null || accountSid.isEmpty() ||
+            apiKey == null || apiKey.isEmpty() ||
+            apiSecret == null || apiSecret.isEmpty()) {
+            Log.w(TAG, "Twilio credentials not found. Proceeding with standard STUN fallback.");
+            onComplete.run();
+            return;
+        }
+
+        final String finalAccountSid = accountSid;
+        final String finalApiKey = apiKey;
+        final String finalApiSecret = apiSecret;
+
+        new Thread(() -> {
+            try {
+                String auth = finalApiKey + ":" + finalApiSecret;
+                String base64Auth = android.util.Base64.encodeToString(auth.getBytes(StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+
+                URL url = new URL("https://api.twilio.com/2010-04-01/Accounts/" + finalAccountSid + "/Tokens.json");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Authorization", "Basic " + base64Auth);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+                conn.setDoOutput(true);
+
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.flush();
+                }
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == HttpURLConnection.HTTP_CREATED || responseCode == HttpURLConnection.HTTP_OK) {
+                    try (InputStream is = conn.getInputStream();
+                         BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        parseTwilioResponse(sb.toString());
+                    }
+                } else {
+                    Log.e(TAG, "Twilio Token API error response code: " + responseCode);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to connect to Twilio Network Traversal API", e);
+            } finally {
+                // Ensure callback execution returns safely to the Main UI Thread
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(onComplete);
+            }
+        }).start();
+    }
+
+    /**
+     * Parses the REST API JSON response payload to configure local IceServer structures.
+     */
+    private void parseTwilioResponse(String jsonString) {
+        try {
+            JSONObject responseObj = new JSONObject(jsonString);
+            if (responseObj.has("ice_servers")) {
+                JSONArray iceServersArray = responseObj.getJSONArray("ice_servers");
+                List<PeerConnection.IceServer> parsedList = new ArrayList<>();
+
+                for (int i = 0; i < iceServersArray.length(); i++) {
+                    JSONObject serverObj = iceServersArray.getJSONObject(i);
+
+                    List<String> urls = new ArrayList<>();
+                    if (serverObj.has("url")) {
+                        urls.add(serverObj.getString("url"));
+                    } else if (serverObj.has("urls")) {
+                        Object urlsVal = serverObj.get("urls");
+                        if (urlsVal instanceof JSONArray) {
+                            JSONArray urlsArray = (JSONArray) urlsVal;
+                            for (int j = 0; j < urlsArray.length(); j++) {
+                                urls.add(urlsArray.getString(j));
+                            }
+                        } else if (urlsVal instanceof String) {
+                            urls.add((String) urlsVal);
+                        }
+                    }
+
+                    String username = serverObj.optString("username", null);
+                    String credential = serverObj.optString("credential", null);
+
+                    for (String url : urls) {
+                        PeerConnection.IceServer.Builder builder = PeerConnection.IceServer.builder(url);
+                        if (username != null && !username.isEmpty() && credential != null && !credential.isEmpty()) {
+                            builder.setUsername(username);
+                            builder.setPassword(credential);
+                        }
+                        parsedList.add(builder.createIceServer());
+                    }
+                }
+
+                synchronized (twilioIceServers) {
+                    twilioIceServers.clear();
+                    twilioIceServers.addAll(parsedList);
+                }
+                Log.d(TAG, "Dynamic Twilio ICE Server Configuration populated. Total servers: " + parsedList.size());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing Twilio API response payload", e);
+        }
+    }
+
+    private PeerConnection createPeerConnection() {
+        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
+        // Add Google's public STUN server as default
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
+
+        // Add dynamically-fetched Twilio TURN/STUN servers
+        synchronized (twilioIceServers) {
+            if (!twilioIceServers.isEmpty()) {
+                iceServers.addAll(twilioIceServers);
+                Log.d(TAG, "Added Twilio dynamic relay endpoints to client config.");
+            } else {
+                Log.w(TAG, "Twilio configuration list empty. Falling back to default P2P STUN.");
+            }
         }
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
