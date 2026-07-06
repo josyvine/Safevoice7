@@ -3,6 +3,7 @@ package com.safevoice.app.webrtc;
 import android.content.Context;
 import android.media.AudioManager;
 import android.os.Build;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
@@ -416,73 +417,80 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     // FirebaseSignalingClient.SignalingListener methods
     @Override
     public void onOfferReceived(SessionDescription sessionDescription) {
-        DiagnosticLogger.logInfo(TAG, "onOfferReceived() invoked. Applying remote description and creating SDP Answer.");
-        if (peerConnection != null) {
-            peerConnection.setRemoteDescription(new SdpObserver() {
-                @Override
-                public void onSetSuccess() {
-                    DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Offer. Creating SDP Answer.");
-                    peerConnection.createAnswer(new SdpObserver() {
-                        @Override
-                        public void onCreateSuccess(SessionDescription answerSdp) {
-                            DiagnosticLogger.logInfo(TAG, "WebRTC SDP Answer created successfully. Applying local description.");
-                            peerConnection.setLocalDescription(new SdpObserver() {
-                                @Override
-                                public void onSetSuccess() {
-                                    DiagnosticLogger.logInfo(TAG, "Local description set successfully for Answer. Dispatched to signaling database.");
-                                    signalingClient.sendAnswer(answerSdp, targetUserUid);
-                                }
-                                @Override
-                                public void onCreateSuccess(SessionDescription sdp) {}
-                                @Override
-                                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply local description for answer: " + s, null); }
-                                @Override
-                                public void onCreateFailure(String s) {}
-                            }, answerSdp);
-                        }
-                        @Override
-                        public void onSetSuccess() {}
-                        @Override
-                        public void onCreateFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to create dynamic SDP Answer: " + s, null); }
-                        @Override
-                        public void onSetFailure(String s) {}
-                    }, new MediaConstraints());
-                }
-                @Override
-                public void onCreateSuccess(SessionDescription sdp) {}
-                @Override
-                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for offer: " + s, null); }
-                @Override
-                public void onCreateFailure(String s) {}
-            }, sessionDescription);
-        }
+        DiagnosticLogger.logInfo(TAG, "onOfferReceived() callback. Posting to Main Thread.");
+        new android.os.Handler(Looper.getMainLooper()).post(() -> {
+            if (peerConnection != null) {
+                peerConnection.setRemoteDescription(new SdpObserver() {
+                    @Override
+                    public void onSetSuccess() {
+                        DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Offer on Main Thread. Creating SDP Answer.");
+                        peerConnection.createAnswer(new SdpObserver() {
+                            @Override
+                            public void onCreateSuccess(SessionDescription answerSdp) {
+                                DiagnosticLogger.logInfo(TAG, "WebRTC SDP Answer created successfully. Applying local description.");
+                                peerConnection.setLocalDescription(new SdpObserver() {
+                                    @Override
+                                    public void onSetSuccess() {
+                                        DiagnosticLogger.logInfo(TAG, "Local description set successfully for Answer. Dispatched to signaling database.");
+                                        signalingClient.sendAnswer(answerSdp, targetUserUid);
+                                    }
+                                    @Override
+                                    public void onCreateSuccess(SessionDescription sdp) {}
+                                    @Override
+                                    public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply local description for answer: " + s, null); }
+                                    @Override
+                                    public void onCreateFailure(String s) {}
+                                }, answerSdp);
+                            }
+                            @Override
+                            public void onSetSuccess() {}
+                            @Override
+                            public void onCreateFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to create dynamic SDP Answer: " + s, null); }
+                            @Override
+                            public void onSetFailure(String s) {}
+                        }, new MediaConstraints());
+                    }
+                    @Override
+                    public void onCreateSuccess(SessionDescription sdp) {}
+                    @Override
+                    public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for offer: " + s, null); }
+                    @Override
+                    public void onCreateFailure(String s) {}
+                }, sessionDescription);
+            }
+        });
     }
 
     @Override
     public void onAnswerReceived(SessionDescription sessionDescription) {
-        DiagnosticLogger.logInfo(TAG, "onAnswerReceived() invoked. Applying remote description.");
-        if (peerConnection != null) {
-            peerConnection.setRemoteDescription(new SdpObserver() {
-                @Override
-                public void onSetSuccess() {
-                    DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Answer. P2P channel ready.");
-                }
-                @Override
-                public void onCreateSuccess(SessionDescription sdp) {}
-                @Override
-                public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for answer: " + s, null); }
-                @Override
-                public void onCreateFailure(String s) {}
-            }, sessionDescription);
-        }
+        DiagnosticLogger.logInfo(TAG, "onAnswerReceived() callback. Posting to Main Thread.");
+        new android.os.Handler(Looper.getMainLooper()).post(() -> {
+            if (peerConnection != null) {
+                peerConnection.setRemoteDescription(new SdpObserver() {
+                    @Override
+                    public void onSetSuccess() {
+                        DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Answer on Main Thread. P2P channel ready.");
+                    }
+                    @Override
+                    public void onCreateSuccess(SessionDescription sdp) {}
+                    @Override
+                    public void onSetFailure(String s) { DiagnosticLogger.logError(TAG, "Failed to apply remote description for answer: " + s, null); }
+                    @Override
+                    public void onCreateFailure(String s) {}
+                }, sessionDescription);
+            }
+        });
     }
 
     @Override
     public void onIceCandidateReceived(IceCandidate iceCandidate) {
-        DiagnosticLogger.logInfo(TAG, "onIceCandidateReceived() invoked. Binding remote candidate to local PeerConnection.");
-        if (peerConnection != null) {
-            peerConnection.addIceCandidate(iceCandidate);
-        }
+        DiagnosticLogger.logInfo(TAG, "onIceCandidateReceived() callback. Posting to Main Thread.");
+        new android.os.Handler(Looper.getMainLooper()).post(() -> {
+            if (peerConnection != null) {
+                peerConnection.addIceCandidate(iceCandidate);
+                DiagnosticLogger.logInfo(TAG, "Remote candidate applied successfully on Main Thread.");
+            }
+        });
     }
 
     @Override
