@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- This block is now included exactly as your reference requires -->
     <uses-sdk
         android:minSdkVersion="23"
         android:targetSdkVersion="34"
@@ -15,6 +14,10 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    
+    <!-- CRITICAL (Bypasses Android 10+ background blocks to solve Glitch 1) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Permissions needed for background alert monitoring and WebRTC signaling -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -65,7 +68,7 @@
             android:label="Set Up Circle"
             android:exported="false" />
 
-        <!-- NEW: The QR scanning portal for family members to join existing circles -->
+        <!-- The QR scanning portal for family members to join existing circles -->
         <activity
             android:name=".CircleJoinQrScanActivity"
             android:label="Scan Circle QR"
@@ -85,7 +88,7 @@
             android:showOnLockScreen="true"
             android:theme="@style/AppTheme.NoActionBar" />
 
-        <!-- NEW: Full-screen WebRTC calling screen featuring mute, speaker, and timer states -->
+        <!-- Full-screen WebRTC calling screen featuring mute, speaker, and timer states -->
         <activity
             android:name=".webrtc.WebRTCCallActivity"
             android:exported="false"
@@ -106,7 +109,7 @@
             android:enabled="true"
             android:exported="false" />
             
-        <!-- NEW: The service for receiving Firebase Cloud Messaging alerts -->
+        <!-- The service for receiving Firebase Cloud Messaging alerts -->
         <service
             android:name=".services.FirebaseAlertService"
             android:exported="false">
