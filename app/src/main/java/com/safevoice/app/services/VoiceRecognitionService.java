@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -34,6 +35,7 @@ import com.google.firebase.database.ValueEventListener;
 import com.safevoice.app.EmergencyPopupActivity;
 import com.safevoice.app.MainActivity;
 import com.safevoice.app.R;
+import com.safevoice.app.utils.DiagnosticLogger;
 
 import java.util.ArrayList;
 import java.util.Locale;
@@ -68,16 +70,21 @@ public class VoiceRecognitionService extends Service {
     public void onCreate() {
         super.onCreate();
         isServiceRunning = true;
+        DiagnosticLogger.logInfo(TAG, "Service onCreate() invoked. Continuous listening loop starting.");
 
-        // Initialize the SpeechRecognizer
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        speechRecognizer.setRecognitionListener(new VoiceRecognitionListener());
+        try {
+            // Initialize the SpeechRecognizer
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            speechRecognizer.setRecognitionListener(new VoiceRecognitionListener());
 
-        // Set up the intent for the speech recognizer
-        speechRecognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
-        speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+            // Set up the intent for the speech recognizer
+            speechRecognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+            speechRecognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Failed to initialize standard system SpeechRecognizer hardware.", e);
+        }
 
         // Start listening to private Realtime Database signaling alerts in real-time
         listenForIncomingAlerts();
@@ -85,9 +92,11 @@ public class VoiceRecognitionService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        DiagnosticLogger.logInfo(TAG, "Service onStartCommand() invoked with startId: " + startId);
+
         // Start the service in the foreground [3]
         startForeground(NOTIFICATION_ID, createNotification());
-        Log.d(TAG, "Service started and is now in the foreground.");
+        DiagnosticLogger.logInfo(TAG, "Service transitioned cleanly to Foreground Mode with notification ID: " + NOTIFICATION_ID);
 
         // Start listening
         startListening();
@@ -106,7 +115,7 @@ public class VoiceRecognitionService extends Service {
             FirebaseUser currentUser = FirebaseAuth.getInstance(circleApp).getCurrentUser();
             
             if (currentUser == null) {
-                Log.w(TAG, "No authenticated user session on safe_voice_circle. Alert listener postponed.");
+                DiagnosticLogger.logWarn(TAG, "No authenticated user session found on safe_voice_circle app. Alert listener postponed.");
                 return;
             }
 
@@ -122,8 +131,10 @@ public class VoiceRecognitionService extends Service {
                         String sessionId = snapshot.child("sessionId").getValue(String.class);
                         String location = snapshot.child("location").getValue(String.class);
 
+                        DiagnosticLogger.logInfo(TAG, "Incoming Realtime Alert change detected. Raw snapshot: " + snapshot.getValue());
+
                         if (callerUid != null) {
-                            Log.i(TAG, "Incoming Realtime Alert detected from: " + callerName);
+                            DiagnosticLogger.logInfo(TAG, "Active Realtime Alert processed. Source caller: " + callerName + " (" + callerUid + ")");
 
                             // 1. Wake up the device screen securely
                             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -136,6 +147,7 @@ public class VoiceRecognitionService extends Service {
                                 );
                                 wakeLock.acquire(10 * 60 * 1000L /* 10 minutes */);
                                 wakeLock.release();
+                                DiagnosticLogger.logInfo(TAG, "Screen wakeup wake-lock acquired and released successfully.");
                             }
 
                             // 2. Play the loud siren alarm tone
@@ -145,22 +157,25 @@ public class VoiceRecognitionService extends Service {
                             showEmergencyNotificationAndPopup(callerName, callerUid, sessionId, location);
 
                             // 4. Delete the database node immediately to consume the alert and prevent looping
-                            snapshot.getRef().removeValue();
+                            DiagnosticLogger.logInfo(TAG, "Consuming alert node to prevent notification looping.");
+                            snapshot.getRef().removeValue()
+                                    .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "Alert node consumed and deleted from Realtime Database."))
+                                    .addOnFailureListener(e -> DiagnosticLogger.logError(TAG, "Failed to delete consumed alert node from Realtime Database.", e));
                         }
                     }
                 }
 
                 @Override
                 public void onCancelled(@NonNull DatabaseError error) {
-                    Log.e(TAG, "Realtime Alerts listener cancelled.", error.toException());
+                    DiagnosticLogger.logError(TAG, "Realtime Alerts listener cancelled by database server.", error.toException());
                 }
             };
 
             alertsReference.addValueEventListener(alertsListener);
-            Log.d(TAG, "Attached Realtime Alert listener for UID: " + currentUser.getUid());
+            DiagnosticLogger.logInfo(TAG, "Attached Realtime Alert listener for UID: " + currentUser.getUid());
 
         } catch (Exception e) {
-            Log.e(TAG, "Error initializing Realtime Alert listener", e);
+            DiagnosticLogger.logError(TAG, "Fatal error initializing Realtime Database Alert listener.", e);
         }
     }
 
@@ -213,14 +228,27 @@ public class VoiceRecognitionService extends Service {
 
         if (notificationManager != null) {
             notificationManager.notify(2, notificationBuilder.build());
+            DiagnosticLogger.logInfo(TAG, "Dispatched full-screen intent high-priority notification.");
         }
 
-        // Direct launch fallback for older Android versions
-        try {
-            popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            startActivity(popupIntent);
-        } catch (Exception e) {
-            Log.w(TAG, "Direct activity launch restricted. Displaying alert via full-screen intent notification.");
+        // Direct launch using SYSTEM_ALERT_WINDOW overlay permission to guarantee instant launch without tapping
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+            try {
+                popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(popupIntent);
+                DiagnosticLogger.logInfo(TAG, "Launched EmergencyPopupActivity directly via overlay permission (zero-touch).");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed direct overlay activity start fallback.", e);
+            }
+        } else {
+            // Direct launch fallback for older Android versions or fallback if overlay is missing
+            try {
+                popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(popupIntent);
+                DiagnosticLogger.logInfo(TAG, "Direct launch initiated.");
+            } catch (Exception e) {
+                DiagnosticLogger.logWarn(TAG, "Direct launch restricted by OS settings. Relying on full-screen intent notification.");
+            }
         }
     }
 
@@ -239,9 +267,10 @@ public class VoiceRecognitionService extends Service {
             serviceRingtone = RingtoneManager.getRingtone(getApplicationContext(), alarmSound);
             if (serviceRingtone != null) {
                 serviceRingtone.play();
+                DiagnosticLogger.logInfo(TAG, "Loud system emergency alarm siren started playing.");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error playing service alarm sound", e);
+            DiagnosticLogger.logError(TAG, "Failed to play default system alarm/siren audio.", e);
         }
     }
 
@@ -249,8 +278,13 @@ public class VoiceRecognitionService extends Service {
      * Public static accessor allowing EmergencyPopupActivity to terminate the siren on stop.
      */
     public static void stopServiceAlarm() {
-        if (serviceRingtone != null && serviceRingtone.isPlaying()) {
-            serviceRingtone.stop();
+        try {
+            if (serviceRingtone != null && serviceRingtone.isPlaying()) {
+                serviceRingtone.stop();
+                DiagnosticLogger.logInfo(TAG, "Loud system emergency alarm siren stopped manually.");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to manually terminate playing alarm siren audio.", e);
         }
     }
 
@@ -258,10 +292,12 @@ public class VoiceRecognitionService extends Service {
     public void onDestroy() {
         super.onDestroy();
         isServiceRunning = false;
+        DiagnosticLogger.logInfo(TAG, "Service onDestroy() invoked. Stopping all background listening routines.");
         
         // Remove the real-time database listener to prevent memory leaks on destroy
         if (alertsReference != null && alertsListener != null) {
             alertsReference.removeEventListener(alertsListener);
+            DiagnosticLogger.logInfo(TAG, "Detached Realtime Database alerts listener successfully.");
         }
         
         stopServiceAlarm();
@@ -269,6 +305,7 @@ public class VoiceRecognitionService extends Service {
         if (speechRecognizer != null) {
             speechRecognizer.stopListening();
             speechRecognizer.destroy();
+            DiagnosticLogger.logInfo(TAG, "System SpeechRecognizer destroyed cleanly.");
         }
         Log.d(TAG, "Service destroyed.");
     }
@@ -282,8 +319,12 @@ public class VoiceRecognitionService extends Service {
 
     private void startListening() {
         if (speechRecognizer != null) {
-            speechRecognizer.startListening(speechRecognizerIntent);
-            Log.d(TAG, "Speech recognizer started listening...");
+            try {
+                speechRecognizer.startListening(speechRecognizerIntent);
+                DiagnosticLogger.logInfo(TAG, "SpeechRecognizer started listening on context.");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed to invoke startListening on SpeechRecognizer hardware.", e);
+            }
         }
     }
 
@@ -329,10 +370,10 @@ public class VoiceRecognitionService extends Service {
             ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches != null) {
                 for (String result : matches) {
-                    Log.d(TAG, "Heard: " + result);
+                    DiagnosticLogger.logInfo(TAG, "Recognizer captured utterance matching text: '" + result + "'");
                     // Check if the recognized text contains the trigger phrase (case-insensitive) [3]
                     if (result.toLowerCase().contains("help help")) {
-                        Log.i(TAG, "TRIGGER PHRASE DETECTED!");
+                        DiagnosticLogger.logInfo(TAG, "TRIGGER PHRASE 'HELP HELP' POSITIVELY DETECTED! INITIATING EMERGENCY SEQUENCE.");
 
                         // Launch the EmergencyHandlerService to handle the alert
                         Intent emergencyIntent = new Intent(VoiceRecognitionService.this, EmergencyHandlerService.class);
