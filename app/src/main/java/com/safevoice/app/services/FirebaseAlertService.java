@@ -11,6 +11,7 @@ import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -24,6 +25,7 @@ import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import com.safevoice.app.EmergencyPopupActivity;
 import com.safevoice.app.R;
+import com.safevoice.app.utils.DiagnosticLogger;
 
 import java.util.Map;
 
@@ -42,23 +44,28 @@ public class FirebaseAlertService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
-        Log.d(TAG, "FCM Message Received from: " + remoteMessage.getFrom());
+        DiagnosticLogger.logInfo(TAG, "Incoming FCM Message received from upstream: " + remoteMessage.getFrom());
 
         Map<String, String> data = remoteMessage.getData();
         if (data.size() > 0) {
-            Log.d(TAG, "Message data payload: " + data);
+            DiagnosticLogger.logInfo(TAG, "FCM data payload parsed: " + data);
             String alertType = data.get("type");
 
             if ("emergency".equals(alertType)) {
+                DiagnosticLogger.logInfo(TAG, "FCM Alert contains target type 'emergency'. Processing active hand-off.");
                 handleEmergencyAlert(data);
+            } else {
+                DiagnosticLogger.logWarn(TAG, "FCM Alert contains unhandled payload type: " + alertType);
             }
+        } else {
+            DiagnosticLogger.logWarn(TAG, "Incoming FCM Message contains an empty data payload.");
         }
     }
 
     @Override
     public void onNewToken(@NonNull String token) {
         super.onNewToken(token);
-        Log.d(TAG, "Refreshed FCM token: " + token);
+        DiagnosticLogger.logInfo(TAG, "Refreshed FCM token received from registration server: " + token);
 
         // Upload the new token to the user's dynamic custom profile in the secondary database
         FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
@@ -69,11 +76,13 @@ public class FirebaseAlertService extends FirebaseMessagingService {
                         .collection("users")
                         .document(currentUser.getUid())
                         .update("fcmToken", token)
-                        .addOnSuccessListener(aVoid -> Log.d(TAG, "FCM Token successfully synchronized on safe_voice_circle."))
-                        .addOnFailureListener(e -> Log.e(TAG, "Failed to synchronize FCM Token on safe_voice_circle.", e));
+                        .addOnSuccessListener(aVoid -> DiagnosticLogger.logInfo(TAG, "FCM Token successfully synchronized on safe_voice_circle FireStore document."))
+                        .addOnFailureListener(e -> DiagnosticLogger.logError(TAG, "Failed to synchronize refreshed FCM Token on safe_voice_circle.", e));
             } catch (IllegalStateException e) {
-                Log.e(TAG, "Dynamic safe_voice_circle database not initialized yet.", e);
+                DiagnosticLogger.logError(TAG, "Dynamic safe_voice_circle database not initialized yet on token refresh callback.", e);
             }
+        } else {
+            DiagnosticLogger.logWarn(TAG, "No authenticated session. FCM Token refresh caching deferred.");
         }
     }
 
@@ -82,6 +91,8 @@ public class FirebaseAlertService extends FirebaseMessagingService {
         String callerUid = data.get("callerUid");
         String sessionId = data.get("sessionId"); // WebRTC session ID
         String location = data.get("location");
+
+        DiagnosticLogger.logInfo(TAG, "Active FCM emergency alerts handler launched. Sender: " + callerName + " (" + callerUid + ")");
 
         // Wake up the device
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -94,6 +105,7 @@ public class FirebaseAlertService extends FirebaseMessagingService {
             );
             wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/);
             wakeLock.release();
+            DiagnosticLogger.logInfo(TAG, "Device screen wake-lock successfully acquired and released.");
         }
 
         // Start playing a loud siren/alarm sound
@@ -105,12 +117,29 @@ public class FirebaseAlertService extends FirebaseMessagingService {
         popupIntent.putExtra(EmergencyPopupActivity.EXTRA_CALLER_UID, callerUid);
         popupIntent.putExtra(EmergencyPopupActivity.EXTRA_SESSION_ID, sessionId);
         popupIntent.putExtra(EmergencyPopupActivity.EXTRA_LOCATION, location);
-        popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-
-        startActivity(popupIntent);
-
+        
         // Also show a high-priority notification as a fallback
         showEmergencyNotification(callerName);
+
+        // Direct launch using SYSTEM_ALERT_WINDOW overlay permission to guarantee instant launch without tapping (zero-touch)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+            try {
+                popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(popupIntent);
+                DiagnosticLogger.logInfo(TAG, "Launched EmergencyPopupActivity directly via overlay permission (zero-touch) from FCM alert.");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Failed direct overlay activity start from FCM fallback.", e);
+            }
+        } else {
+            // Direct launch fallback for older Android versions or fallback if overlay is missing
+            try {
+                popupIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(popupIntent);
+                DiagnosticLogger.logInfo(TAG, "Direct launch initiated from FCM alert.");
+            } catch (Exception e) {
+                DiagnosticLogger.logWarn(TAG, "Direct launch restricted by OS settings. Relying on full-screen intent notification from FCM alert.");
+            }
+        }
     }
 
     private void showEmergencyNotification(String callerName) {
@@ -130,7 +159,9 @@ public class FirebaseAlertService extends FirebaseMessagingService {
             channel.setDescription("High-priority alerts for Safe Voice emergencies");
             channel.enableVibration(true);
             channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            notificationManager.createNotificationChannel(channel);
+            if (notificationManager != null) {
+                notificationManager.createNotificationChannel(channel);
+            }
         }
 
         NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, EMERGENCY_CHANNEL_ID)
@@ -143,7 +174,10 @@ public class FirebaseAlertService extends FirebaseMessagingService {
                 .setFullScreenIntent(pendingIntent, true) // Makes it a heads-up notification
                 .setContentIntent(pendingIntent);
 
-        notificationManager.notify(1, notificationBuilder.build());
+        if (notificationManager != null) {
+            notificationManager.notify(1, notificationBuilder.build());
+            DiagnosticLogger.logInfo(TAG, "FCM fallback high-priority notification successfully dispatched.");
+        }
     }
 
     private void playAlarmSound() {
@@ -156,15 +190,23 @@ public class FirebaseAlertService extends FirebaseMessagingService {
                 alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
             }
             ringtone = RingtoneManager.getRingtone(getApplicationContext(), alarmSound);
-            ringtone.play();
+            if (ringtone != null) {
+                ringtone.play();
+                DiagnosticLogger.logInfo(TAG, "FCM emergency alarm siren started playing.");
+            }
         } catch (Exception e) {
-            Log.e(TAG, "Error playing alarm sound", e);
+            DiagnosticLogger.logError(TAG, "Failed to play FCM emergency alarm siren audio.", e);
         }
     }
 
     public static void stopAlarmSound() {
-        if (ringtone != null && ringtone.isPlaying()) {
-            ringtone.stop();
+        try {
+            if (ringtone != null && ringtone.isPlaying()) {
+                ringtone.stop();
+                DiagnosticLogger.logInfo(TAG, "FCM emergency alarm siren stopped manually.");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to manually terminate playing alarm siren audio.", e);
         }
     }
 }
