@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Speakerphone Active State (When button is toggled/selected to active) -->
+    <item android:state_selected="true" android:drawable="@drawable/speaker_phone_24px" />
+    
+    <!-- Speakerphone Inactive State / Earpiece Mode (Default setting) -->
+    <item android:drawable="@drawable/volume_mute_24px" />
+</selector>
