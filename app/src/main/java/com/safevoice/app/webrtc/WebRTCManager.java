@@ -61,6 +61,10 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     // Cache list to store Twilio TURN servers dynamically fetched from the REST API
     private final List<PeerConnection.IceServer> twilioIceServers = new ArrayList<>();
 
+    // Variables to queue early incoming ICE candidates before the remote description is applied
+    private boolean isRemoteDescriptionSet = false;
+    private final List<IceCandidate> queuedRemoteCandidates = new ArrayList<>();
+
     public interface WebRTCListener {
         void onWebRTCCallEstablished();
         void onWebRTCCallEnded();
@@ -411,6 +415,12 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         
         resetAudioRouting();
 
+        // Reset variables and clear queued remote candidate collection
+        isRemoteDescriptionSet = false;
+        synchronized (queuedRemoteCandidates) {
+            queuedRemoteCandidates.clear();
+        }
+
         if (peerConnection != null) {
             peerConnection.close();
             peerConnection = null;
@@ -424,6 +434,21 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         signalingClient.endCall();
     }
 
+    // Helper to safely drain incoming remote candidates that were collected early
+    private void drainQueuedCandidates() {
+        synchronized (queuedRemoteCandidates) {
+            isRemoteDescriptionSet = true;
+            DiagnosticLogger.logInfo(TAG, "Draining " + queuedRemoteCandidates.size() + " queued remote ICE candidates.");
+            for (IceCandidate candidate : queuedRemoteCandidates) {
+                if (peerConnection != null) {
+                    peerConnection.addIceCandidate(candidate);
+                    DiagnosticLogger.logInfo(TAG, "Drained and applied queued remote candidate.");
+                }
+            }
+            queuedRemoteCandidates.clear();
+        }
+    }
+
     // FirebaseSignalingClient.SignalingListener methods
     @Override
     public void onOfferReceived(SessionDescription sessionDescription) {
@@ -434,6 +459,10 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                     @Override
                     public void onSetSuccess() {
                         DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Offer on Main Thread. Creating SDP Answer.");
+                        
+                        // Drain queued candidates immediately after successfully setting the remote description
+                        drainQueuedCandidates();
+
                         peerConnection.createAnswer(new SdpObserver() {
                             @Override
                             public void onCreateSuccess(SessionDescription answerSdp) {
@@ -480,6 +509,9 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                     @Override
                     public void onSetSuccess() {
                         DiagnosticLogger.logInfo(TAG, "Remote description successfully set for Answer on Main Thread. P2P channel ready.");
+                        
+                        // Drain queued candidates immediately after successfully setting the remote description
+                        drainQueuedCandidates();
                     }
                     @Override
                     public void onCreateSuccess(SessionDescription sdp) {}
@@ -497,8 +529,15 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         DiagnosticLogger.logInfo(TAG, "onIceCandidateReceived() callback. Posting to Main Thread.");
         new android.os.Handler(Looper.getMainLooper()).post(() -> {
             if (peerConnection != null) {
-                peerConnection.addIceCandidate(iceCandidate);
-                DiagnosticLogger.logInfo(TAG, "Remote candidate applied successfully on Main Thread.");
+                synchronized (queuedRemoteCandidates) {
+                    if (isRemoteDescriptionSet) {
+                        peerConnection.addIceCandidate(iceCandidate);
+                        DiagnosticLogger.logInfo(TAG, "Remote candidate applied successfully on Main Thread.");
+                    } else {
+                        queuedRemoteCandidates.add(iceCandidate);
+                        DiagnosticLogger.logInfo(TAG, "Remote description not set yet. Remote candidate queued on Main Thread.");
+                    }
+                }
             }
         });
     }
