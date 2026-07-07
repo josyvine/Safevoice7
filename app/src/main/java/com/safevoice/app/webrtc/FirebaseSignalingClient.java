@@ -214,6 +214,10 @@ public class FirebaseSignalingClient {
     public void sendOffer(SessionDescription sdp, String targetUserUid) {
         if (callSessionRef == null) {
             createCallSession(targetUserUid);
+        } else {
+            // FIX: Pre-prepared sessions must invoke signal listeners here
+            // so the caller subscribes to receive callee answers and ICE candidate pools.
+            listenForSignals(targetUserUid);
         }
         DiagnosticLogger.logInfo(TAG, "Sending SDP Offer to target session root.");
         Map<String, Object> offerData = new HashMap<>();
