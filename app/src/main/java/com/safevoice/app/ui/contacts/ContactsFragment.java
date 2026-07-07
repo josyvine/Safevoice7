@@ -36,6 +36,7 @@ import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 import com.google.firebase.firestore.QuerySnapshot;
+import com.google.firebase.firestore.SetOptions;
 import com.google.firebase.firestore.WriteBatch;
 import com.safevoice.app.R;
 import com.safevoice.app.databinding.FragmentContactsBinding;
@@ -169,6 +170,10 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                         Contact selectedContact = priorityContacts.get(which);
                         contactsManager.savePrimaryContact(selectedContact);
                         loadContacts();
+                        
+                        // RESTORE LOGIC FOR GLITCH 2: Sync changes directly to Firestore
+                        syncContactsToFirestore();
+
                         Toast.makeText(getContext(), "Primary Contact set to: " + selectedContact.getName(), Toast.LENGTH_SHORT).show();
                     }
                 })
@@ -415,6 +420,9 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                             contactsManager.addPriorityContact(newContact);
                             loadContacts();
 
+                            // RESTORE LOGIC FOR GLITCH 2: Push additions directly to Firestore
+                            syncContactsToFirestore();
+
                             request.getReference().delete();
                         } else {
                             Log.w(TAG, "Failed to get user profile for sender: " + senderUid, task.getException());
@@ -449,6 +457,10 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                 } else if (itemId == R.id.action_delete_contact) {
                     contactsManager.deletePriorityContact(contact);
                     loadContacts();
+
+                    // RESTORE LOGIC FOR GLITCH 2: Synchronize deletions directly to Firestore
+                    syncContactsToFirestore();
+
                     Toast.makeText(getContext(), "Contact deleted.", Toast.LENGTH_SHORT).show();
                     return true;
                 }
@@ -486,7 +498,9 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                     return;
                 }
 
-                Contact newContact = new Contact(name, phone);
+                // Preserve existing contact's UID mapping if edits are applied
+                String existingUid = (existingContact != null) ? existingContact.getUid() : null;
+                Contact newContact = new Contact(name, phone, existingUid);
 
                 if (isPrimary) {
                     contactsManager.savePrimaryContact(newContact);
@@ -497,6 +511,9 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
                     contactsManager.addPriorityContact(newContact);
                 }
                 loadContacts();
+
+                // RESTORE LOGIC FOR GLITCH 2: Sync updates directly to Firestore
+                syncContactsToFirestore();
             }
         });
 
@@ -507,6 +524,46 @@ public class ContactsFragment extends Fragment implements ContactsAdapter.OnCont
         });
 
         builder.create().show();
+    }
+
+    /**
+     * Serializes contact details and uploads them to the dynamic Firestore database.
+     */
+    private void syncContactsToFirestore() {
+        FirebaseUser currentUser = mAuth.getCurrentUser();
+        if (currentUser == null) return;
+
+        Contact primaryContact = contactsManager.getPrimaryContact();
+        List<Contact> priorityContacts = contactsManager.getPriorityContacts();
+
+        Map<String, Object> updates = new HashMap<>();
+
+        // Map Primary Contact to document structure
+        if (primaryContact != null) {
+            Map<String, Object> primaryMap = new HashMap<>();
+            primaryMap.put("name", primaryContact.getName());
+            primaryMap.put("phoneNumber", primaryContact.getPhoneNumber());
+            primaryMap.put("uid", primaryContact.getUid());
+            updates.put("primaryContact", primaryMap);
+        } else {
+            updates.put("primaryContact", null);
+        }
+
+        // Map Priority Contacts List to document structure
+        List<Map<String, Object>> priorityListMaps = new ArrayList<>();
+        for (Contact contact : priorityContacts) {
+            Map<String, Object> contactMap = new HashMap<>();
+            contactMap.put("name", contact.getName());
+            contactMap.put("phoneNumber", contact.getPhoneNumber());
+            contactMap.put("uid", contact.getUid());
+            priorityListMaps.add(contactMap);
+        }
+        updates.put("priorityContacts", priorityListMaps);
+
+        db.collection("users").document(currentUser.getUid())
+                .set(updates, SetOptions.merge())
+                .addOnSuccessListener(aVoid -> Log.d(TAG, "Contacts successfully synchronized to Firestore profile node."))
+                .addOnFailureListener(e -> Log.e(TAG, "Failed to synchronize contacts to Firestore profile node.", e));
     }
 
     @Override
