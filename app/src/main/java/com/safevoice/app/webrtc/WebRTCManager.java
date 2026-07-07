@@ -150,8 +150,7 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     public void answerCall(String sessionId, String callerUid) {
         this.targetUserUid = callerUid;
-        DiagnosticLogger.logInfo(TAG, "answerCall() triggered. Joining signaling session: " + sessionId);
-        this.signalingClient.joinCallSession(sessionId);
+        DiagnosticLogger.logInfo(TAG, "answerCall() triggered. Deferring signaling subscription until PeerConnection is ready.");
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
@@ -162,6 +161,10 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                 return;
             }
             createAndSetLocalAudioTrack();
+
+            // FIX: Join signaling session only AFTER PeerConnection is fully built to prevent race conditions
+            DiagnosticLogger.logInfo(TAG, "Callee PeerConnection is fully built. Joining signaling session: " + sessionId);
+            this.signalingClient.joinCallSession(sessionId);
         });
     }
 
