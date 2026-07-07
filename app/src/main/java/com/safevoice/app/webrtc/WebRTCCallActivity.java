@@ -96,12 +96,12 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
 
         if (isOutgoing) {
             binding.textCallStatus.setText("Calling Family Circle...");
-            DiagnosticLogger.logInfo(TAG, "Outgoing connection request initiated for target UID: " + recipientUid);
-            // Start WebRTC connection peer constraints
-            if (recipientUid != null) {
-                webRTCManager.startCall(recipientUid);
+            DiagnosticLogger.logInfo(TAG, "Outgoing connection request initiated for target UID: " + recipientUid + " with Session ID: " + sessionId);
+            // Start WebRTC connection using both recipient UID and pre-generated Session ID
+            if (recipientUid != null && sessionId != null) {
+                webRTCManager.startCall(recipientUid, sessionId);
             } else {
-                DiagnosticLogger.logError(TAG, "Failed to start call. Recipient target UID is null.", null);
+                DiagnosticLogger.logError(TAG, "Failed to start call. Recipient target UID or Session ID is null.", null);
                 Toast.makeText(this, "No recipient target available.", Toast.LENGTH_SHORT).show();
                 finish();
             }
