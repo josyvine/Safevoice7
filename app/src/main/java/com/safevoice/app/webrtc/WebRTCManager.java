@@ -98,9 +98,16 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         }
     }
 
-    public void startCall(String targetUserUid) {
+    /**
+     * Starts an outgoing WebRTC call. Binds the signaling client to the pre-generated session ID
+     * so that the caller and callee successfully enter the exact same signaling room.
+     */
+    public void startCall(String targetUserUid, String sessionId) {
         this.targetUserUid = targetUserUid;
-        DiagnosticLogger.logInfo(TAG, "startCall() triggered. Initiating Twilio REST handshake.");
+        DiagnosticLogger.logInfo(TAG, "startCall() triggered with Session ID: " + sessionId + ". Initiating Twilio REST handshake.");
+
+        // Explicitly prepare and bind the call session node to the pre-generated session ID
+        signalingClient.prepareCallSession(sessionId, true);
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
