@@ -1,6 +1,7 @@
 package com.safevoice.app;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
@@ -9,6 +10,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKeys;
 
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
@@ -27,10 +30,16 @@ import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.safevoice.app.databinding.ActivityLoginBinding;
+import com.safevoice.app.models.Contact;
 import com.safevoice.app.utils.CentralConfig;
+import com.safevoice.app.utils.ContactsManager;
 import com.safevoice.app.utils.EncryptionHelper;
 
+import java.io.IOException;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -202,9 +211,10 @@ public class LoginActivity extends AppCompatActivity {
                                     finish();
                                 });
                     } else {
-                        Log.d(TAG, "Existing user on secondary DB. Profile already exists.");
-                        Toast.makeText(LoginActivity.this, "Sign-In Successful.", Toast.LENGTH_SHORT).show();
-                        finish();
+                        Log.d(TAG, "Existing user on secondary DB. Profile already exists. Synchronizing cloud credentials.");
+                        
+                        // RESTORE LOGIC FOR GLITCH 2: Re-populate local cache with existing cloud backups
+                        restoreUserDataAndTwilio(secondaryUser.getUid());
                     }
                 } else {
                     Log.w(TAG, "Failed to check for user document on secondary DB.", snapshotTask.getException());
@@ -213,5 +223,92 @@ public class LoginActivity extends AppCompatActivity {
                 }
             }
         });
+    }
+
+    /**
+     * Downloads and populates primary/priority contacts as well as Twilio credentials from Firestore.
+     */
+    private void restoreUserDataAndTwilio(String uid) {
+        db.collection("users").document(uid).get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (documentSnapshot.exists()) {
+                        ContactsManager contactsManager = ContactsManager.getInstance(LoginActivity.this);
+
+                        // 1. Restore Primary Contact from Firestore Map
+                        Map<String, Object> primaryContactMap = (Map<String, Object>) documentSnapshot.get("primaryContact");
+                        if (primaryContactMap != null) {
+                            String name = (String) primaryContactMap.get("name");
+                            String phone = (String) primaryContactMap.get("phoneNumber");
+                            String contactUid = (String) primaryContactMap.get("uid");
+                            contactsManager.savePrimaryContact(new Contact(name, phone, contactUid));
+                            Log.d(TAG, "Primary contact successfully synchronized from Firestore.");
+                        }
+
+                        // 2. Restore Priority Contacts List from Firestore Array of Maps
+                        List<Map<String, Object>> priorityContactsList = (List<Map<String, Object>>) documentSnapshot.get("priorityContacts");
+                        if (priorityContactsList != null) {
+                            List<Contact> restoredPriorityList = new ArrayList<>();
+                            for (Map<String, Object> contactMap : priorityContactsList) {
+                                String name = (String) contactMap.get("name");
+                                String phone = (String) contactMap.get("phoneNumber");
+                                String contactUid = (String) contactMap.get("uid");
+                                restoredPriorityList.add(new Contact(name, phone, contactUid));
+                            }
+                            contactsManager.savePriorityContactsList(restoredPriorityList);
+                            Log.d(TAG, "Priority contacts collection successfully synchronized from Firestore. Count: " + restoredPriorityList.size());
+                        }
+                    }
+
+                    // 3. Restore sensitive Twilio settings from the protected config subcollection
+                    restoreTwilioCredentials(uid);
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Failed to pull profile data during cloud synchronization.", e);
+                    // Attempt to restore Twilio settings fallback
+                    restoreTwilioCredentials(uid);
+                });
+    }
+
+    /**
+     * Recovers keys from the secure Firestore subcollection and writes them to EncryptedSharedPreferences.
+     */
+    private void restoreTwilioCredentials(String uid) {
+        db.collection("users").document(uid)
+                .collection("private_config").document("twilio").get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (documentSnapshot.exists()) {
+                        String accountSid = documentSnapshot.getString("ACCOUNT_SID");
+                        String apiKey = documentSnapshot.getString("API_KEY");
+                        String apiSecret = documentSnapshot.getString("API_SECRET");
+
+                        if (accountSid != null && apiKey != null && apiSecret != null) {
+                            try {
+                                String masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC);
+                                SharedPreferences encryptedPrefs = EncryptedSharedPreferences.create(
+                                        "TwilioCredentials",
+                                        masterKeyAlias,
+                                        LoginActivity.this,
+                                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                                );
+                                encryptedPrefs.edit()
+                                        .putString("ACCOUNT_SID", accountSid)
+                                        .putString("API_KEY", apiKey)
+                                        .putString("API_SECRET", apiSecret)
+                                        .apply();
+                                Log.d(TAG, "Secure Twilio credentials synchronized and written to local EncryptedSharedPreferences.");
+                            } catch (GeneralSecurityException | IOException e) {
+                                Log.e(TAG, "Failed to apply secure local cache encryption mapping.", e);
+                            }
+                        }
+                    }
+                    Toast.makeText(LoginActivity.this, "Sign-In and Sync Successful.", Toast.LENGTH_SHORT).show();
+                    finish();
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Failed to resolve secure subcollection credentials payload.", e);
+                    Toast.makeText(LoginActivity.this, "Sign-In Successful (Sync Delayed).", Toast.LENGTH_SHORT).show();
+                    finish();
+                });
     }
 }
