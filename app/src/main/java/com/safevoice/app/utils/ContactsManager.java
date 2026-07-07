@@ -119,8 +119,6 @@ public class ContactsManager {
         savePriorityContactsList(currentContacts);
     }
 
-
-
     /**
      * Deletes a specific priority contact from the list.
      *
@@ -132,22 +130,37 @@ public class ContactsManager {
         currentContacts.remove(contactToDelete);
         savePriorityContactsList(currentContacts);
     }
+
+    /**
+     * Clears all contacts from local SharedPreferences.
+     * Useful for switching accounts or executing clean logins.
+     */
+    public void clearAllContacts() {
+        SharedPreferences.Editor editor = sharedPreferences.edit();
+        editor.remove(KEY_PRIMARY_CONTACT);
+        editor.remove(KEY_PRIORITY_CONTACTS);
+        editor.apply();
+        Log.d(TAG, "All local contacts cleared successfully from cache.");
+    }
     
     /**
-     * Private helper method to save the entire list of priority contacts.
+     * Saves the entire list of priority contacts.
+     * Exposed as public to support programmatic restoration of contacts fetched from Firestore.
      *
      * @param contacts The list of Contact objects to save.
      */
-    private void savePriorityContactsList(List<Contact> contacts) {
+    public void savePriorityContactsList(List<Contact> contacts) {
         JSONArray contactsJsonArray = new JSONArray();
-        for (Contact contact : contacts) {
-            JSONObject contactJson = contact.toJSONObject();
-            if (contactJson != null) {
-                contactsJsonArray.put(contactJson);
+        if (contacts != null) {
+            for (Contact contact : contacts) {
+                JSONObject contactJson = contact.toJSONObject();
+                if (contactJson != null) {
+                    contactsJsonArray.put(contactJson);
+                }
             }
         }
         SharedPreferences.Editor editor = sharedPreferences.edit();
         editor.putString(KEY_PRIORITY_CONTACTS, contactsJsonArray.toString());
         editor.apply();
     }
-          }
+}
