@@ -70,9 +70,19 @@ public class FirebaseSignalingClient {
         this.listener = listener;
     }
 
+    /**
+     * Binds this client's database reference directly to a pre-generated custom session ID.
+     * This avoids generating new session keys on outgoing caller hand-offs.
+     */
+    public void prepareCallSession(String sessionId, boolean isCaller) {
+        this.isCaller = isCaller;
+        this.callSessionRef = database.getReference(CALL_SESSIONS_NODE).child(sessionId);
+        DiagnosticLogger.logInfo(TAG, "Explicitly prepared Call Session ID: " + sessionId + " (isCaller: " + isCaller + ") at path: " + callSessionRef.getPath());
+    }
+
     public void createCallSession(String targetUserUid) {
         this.isCaller = true;
-        // A unique session ID is created by the caller
+        // A unique session ID is created by the caller (Fallback)
         this.callSessionRef = database.getReference(CALL_SESSIONS_NODE).push();
         DiagnosticLogger.logInfo(TAG, "Created new Call Session node in RTDB at path: " + callSessionRef.getPath());
         listenForSignals(targetUserUid);
@@ -100,7 +110,7 @@ public class FirebaseSignalingClient {
         });
     }
 
-    private void listenForSignals(String remoteUserUid) {
+    public void listenForSignals(String remoteUserUid) {
         DiagnosticLogger.logInfo(TAG, "Subscribing signaling listeners. Current role isCaller: " + isCaller + ", Remote user: " + remoteUserUid);
 
         // 1. Listener for session lifecycle changes (essential to solve Glitch 2)
