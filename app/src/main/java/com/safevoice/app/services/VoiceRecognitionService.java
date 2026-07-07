@@ -58,8 +58,12 @@ public class VoiceRecognitionService extends Service {
     private SpeechRecognizer speechRecognizer;
     private Intent speechRecognizerIntent;
 
+    // Track active service instance context to allow static helper control calls
+    private static VoiceRecognitionService instance = null;
+
     // A public static flag to allow UI components (like HomeFragment) to check if the service is active [3].
     public static boolean isServiceRunning = false;
+    public static boolean isPaused = false;
 
     // Real-Time signaling references
     private DatabaseReference alertsReference;
@@ -70,6 +74,7 @@ public class VoiceRecognitionService extends Service {
     public void onCreate() {
         super.onCreate();
         isServiceRunning = true;
+        instance = this;
         DiagnosticLogger.logInfo(TAG, "Service onCreate() invoked. Continuous listening loop starting.");
 
         try {
@@ -103,6 +108,42 @@ public class VoiceRecognitionService extends Service {
 
         // If the service is killed, it will be automatically restarted [3].
         return START_STICKY;
+    }
+
+    /**
+     * Instructs the voice recognition loop to stop capturing microphone audio and pause its execution.
+     */
+    public static void pauseListening() {
+        isPaused = true;
+        DiagnosticLogger.logInfo(TAG, "pauseListening() invoked. Halting continuous SpeechRecognizer to release audio hardware.");
+        if (instance != null) {
+            instance.stopSpeechRecognizer();
+        }
+    }
+
+    /**
+     * Commands the continuous voice recognition loop to resume.
+     */
+    public static void resumeListening() {
+        isPaused = false;
+        DiagnosticLogger.logInfo(TAG, "resumeListening() invoked. Restarting continuous voice loop.");
+        if (instance != null) {
+            instance.startListening();
+        }
+    }
+
+    /**
+     * Safely cancels system-level background recordings to free the hardware resource.
+     */
+    private void stopSpeechRecognizer() {
+        if (speechRecognizer != null) {
+            try {
+                speechRecognizer.cancel();
+                DiagnosticLogger.logInfo(TAG, "SpeechRecognizer cancel() executed successfully.");
+            } catch (Exception e) {
+                DiagnosticLogger.logError(TAG, "Exception encountered during SpeechRecognizer.cancel()", e);
+            }
+        }
     }
 
     /**
@@ -292,6 +333,7 @@ public class VoiceRecognitionService extends Service {
     public void onDestroy() {
         super.onDestroy();
         isServiceRunning = false;
+        instance = null;
         DiagnosticLogger.logInfo(TAG, "Service onDestroy() invoked. Stopping all background listening routines.");
         
         // Remove the real-time database listener to prevent memory leaks on destroy
@@ -318,6 +360,11 @@ public class VoiceRecognitionService extends Service {
     }
 
     private void startListening() {
+        if (isPaused) {
+            DiagnosticLogger.logInfo(TAG, "startListening skipped because continuous voice recognition is paused.");
+            return;
+        }
+
         if (speechRecognizer != null) {
             try {
                 speechRecognizer.startListening(speechRecognizerIntent);
@@ -385,16 +432,19 @@ public class VoiceRecognitionService extends Service {
                     }
                 }
             }
-            // If the trigger phrase was not detected, restart listening for the next utterance.
-            startListening();
+            // If the trigger phrase was not detected, restart listening for the next utterance unless paused.
+            if (!isPaused) {
+                startListening();
+            }
         }
 
         @Override
         public void onError(int error) {
-            // Most errors are normal (e.g., no speech detected). We just restart the listener.
+            // Most errors are normal (e.g., no speech detected). We just restart the listener unless paused.
             Log.d(TAG, "Speech recognizer error: " + error);
-            // Restart listening after any error to ensure continuity [3].
-            startListening();
+            if (!isPaused) {
+                startListening();
+            }
         }
 
         // --- Other listener methods (can be left empty for this implementation) ---
