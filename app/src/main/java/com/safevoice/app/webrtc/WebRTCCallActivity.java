@@ -86,6 +86,9 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
         // Stop background sirens immediately once call is opened
         VoiceRecognitionService.stopServiceAlarm();
 
+        // Pause continuous background SpeechRecognizer to free microphone hardware for WebRTC
+        VoiceRecognitionService.pauseListening();
+
         initializeCall();
         setupClickListeners();
     }
@@ -214,6 +217,9 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
             webRTCManager.cleanup();
             webRTCManager = null;
         }
+
+        // Resume continuous continuous voice trigger loop since active VoIP session has concluded
+        VoiceRecognitionService.resumeListening();
     }
 
     // WebRTCManager.WebRTCListener callbacks
