@@ -27,6 +27,10 @@ import androidx.fragment.app.Fragment;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKeys;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.firestore.FirebaseFirestore;
 import com.safevoice.app.R;
 import com.safevoice.app.databinding.FragmentSettingsBinding;
 import com.safevoice.app.firebase.FirebaseManager;
@@ -35,6 +39,8 @@ import com.safevoice.app.utils.EncryptionHelper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The fragment for the "Settings" screen.
@@ -53,6 +59,9 @@ public class SettingsFragment extends Fragment {
     private ActivityResultLauncher<Intent> filePickerLauncher;
     private SharedPreferences settingsPrefs;
 
+    private FirebaseFirestore db;
+    private FirebaseAuth mAuth;
+
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
@@ -64,6 +73,19 @@ public class SettingsFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // Safely map dynamic database elements to protect cloud sync configurations
+        FirebaseApp circleApp;
+        try {
+            circleApp = FirebaseApp.getInstance("safe_voice_circle");
+            db = FirebaseFirestore.getInstance(circleApp);
+            mAuth = FirebaseAuth.getInstance(circleApp);
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary safe_voice_circle app is not initialized yet. Falling back.", e);
+            circleApp = FirebaseApp.getInstance();
+            db = FirebaseFirestore.getInstance();
+            mAuth = FirebaseAuth.getInstance();
+        }
 
         initializeLaunchers();
         setupClickListeners();
@@ -174,7 +196,7 @@ public class SettingsFragment extends Fragment {
             binding.editTextTwilioApiKey.setText(encryptedPrefs.getString("API_KEY", ""));
             binding.editTextTwilioApiSecret.setText(encryptedPrefs.getString("API_SECRET", ""));
         } catch (GeneralSecurityException | IOException e) {
-            Log.e(TAG, "Could not load Twilio credentials", e);
+            Log.e(TAG, "Could not load Twilio credentials from local cache.", e);
         }
     }
 
@@ -193,11 +215,27 @@ public class SettingsFragment extends Fragment {
             String apiKey = binding.editTextTwilioApiKey.getText().toString().trim();
             String apiSecret = binding.editTextTwilioApiSecret.getText().toString().trim();
 
+            // Save settings locally in encrypted storage container
             encryptedPrefs.edit()
                     .putString("ACCOUNT_SID", accountSid)
                     .putString("API_KEY", apiKey)
                     .putString("API_SECRET", apiSecret)
                     .apply();
+
+            // RESTORE LOGIC FOR GLITCH 2: Safely back up credentials to the secure Firestore subcollection
+            FirebaseUser currentUser = mAuth.getCurrentUser();
+            if (currentUser != null) {
+                Map<String, Object> twilioData = new HashMap<>();
+                twilioData.put("ACCOUNT_SID", accountSid);
+                twilioData.put("API_KEY", apiKey);
+                twilioData.put("API_SECRET", apiSecret);
+
+                db.collection("users").document(currentUser.getUid())
+                        .collection("private_config").document("twilio")
+                        .set(twilioData)
+                        .addOnSuccessListener(aVoid -> Log.d(TAG, "Twilio configuration successfully backed up to secure Firestore path."))
+                        .addOnFailureListener(e -> Log.e(TAG, "Failed to back up Twilio credentials to Firestore path.", e));
+            }
 
             Toast.makeText(getContext(), R.string.twilio_credentials_saved, Toast.LENGTH_SHORT).show();
 
