@@ -2,7 +2,9 @@ package com.safevoice.app.webrtc;
 
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +19,7 @@ import com.safevoice.app.databinding.ActivityWebrtcCallBinding;
 import com.safevoice.app.services.VoiceRecognitionService;
 import com.safevoice.app.utils.DiagnosticLogger;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -168,16 +171,43 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
         binding.buttonMute.setSelected(isMuted);
     }
 
+    private void setSpeakerphone(boolean on) {
+        if (audioManager == null) return;
+        try {
+            // Apply communication device routing for Android 12+ (API Level 31+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (on) {
+                    List<AudioDeviceInfo> devices = audioManager.getAvailableCommunicationDevices();
+                    AudioDeviceInfo speakerDevice = null;
+                    for (AudioDeviceInfo device : devices) {
+                        if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                            speakerDevice = device;
+                            break;
+                        }
+                    }
+                    if (speakerDevice != null) {
+                        boolean success = audioManager.setCommunicationDevice(speakerDevice);
+                        DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Successfully routed output to built-in speaker. Success: " + success);
+                    } else {
+                        DiagnosticLogger.logWarn(TAG, "Android 12+ Audio Routing: Built-in speaker device not found.");
+                    }
+                } else {
+                    audioManager.clearCommunicationDevice();
+                    DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Cleared communication device routing.");
+                }
+            } else {
+                // Apply legacy fallback for older platform versions
+                audioManager.setSpeakerphoneOn(on);
+                DiagnosticLogger.logInfo(TAG, "Legacy Audio Routing: Successfully routed output stream. Speaker state: " + on);
+            }
+        } catch (Exception e) {
+            DiagnosticLogger.logError(TAG, "Failed to apply system hardware audio routing mapping.", e);
+        }
+    }
+
     private void toggleSpeaker() {
         isSpeakerOn = !isSpeakerOn;
-        if (audioManager != null) {
-            try {
-                audioManager.setSpeakerphoneOn(isSpeakerOn);
-                DiagnosticLogger.logInfo(TAG, "Speakerphone toggled. Hardware speakerphone state: " + isSpeakerOn);
-            } catch (Exception e) {
-                DiagnosticLogger.logError(TAG, "Failed to apply hardware speakerphone state.", e);
-            }
-        }
+        setSpeakerphone(isSpeakerOn);
         binding.buttonSpeaker.setSelected(isSpeakerOn);
     }
 
@@ -232,16 +262,10 @@ public class WebRTCCallActivity extends AppCompatActivity implements WebRTCManag
                 binding.textCallStatus.setText("00:00");
                 startTimer();
                 // Route audio output to speakerphone automatically for emergency convenience
-                if (audioManager != null) {
-                    try {
-                        audioManager.setSpeakerphoneOn(true);
-                        isSpeakerOn = true;
-                        binding.buttonSpeaker.setSelected(true);
-                        DiagnosticLogger.logInfo(TAG, "VoIP speakerphone auto-activated for hands-free emergency convenience.");
-                    } catch (Exception e) {
-                        DiagnosticLogger.logError(TAG, "Failed to auto-route audio stream to speakerphone.", e);
-                    }
-                }
+                setSpeakerphone(true);
+                isSpeakerOn = true;
+                binding.buttonSpeaker.setSelected(true);
+                DiagnosticLogger.logInfo(TAG, "VoIP speakerphone auto-activated for hands-free emergency convenience.");
             }
         });
     }
