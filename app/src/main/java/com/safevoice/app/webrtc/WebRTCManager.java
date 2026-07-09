@@ -1,6 +1,7 @@
 package com.safevoice.app.webrtc;
 
 import android.content.Context;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Looper;
@@ -377,9 +378,29 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         try {
             if (audioManager != null) {
                 audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                audioManager.setSpeakerphoneOn(true); // Default to speakerphone for hands-free convenience
                 audioManager.setMicrophoneMute(false);
-                DiagnosticLogger.logInfo(TAG, "System AudioManager set to MODE_IN_COMMUNICATION. Speakerphone turned ON.");
+
+                // Use the updated communication device API for Android 12+ (API Level 31+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    List<AudioDeviceInfo> availableDevices = audioManager.getAvailableCommunicationDevices();
+                    AudioDeviceInfo speakerDevice = null;
+                    for (AudioDeviceInfo device : availableDevices) {
+                        if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                            speakerDevice = device;
+                            break;
+                        }
+                    }
+                    if (speakerDevice != null) {
+                        boolean result = audioManager.setCommunicationDevice(speakerDevice);
+                        DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Forced communication to built-in speaker. Result: " + result);
+                    } else {
+                        DiagnosticLogger.logWarn(TAG, "Android 12+ Audio Routing: Built-in speaker device not found.");
+                    }
+                } else {
+                    // Fallback configuration for pre-Android 12 platforms
+                    audioManager.setSpeakerphoneOn(true);
+                    DiagnosticLogger.logInfo(TAG, "Legacy Audio Routing: forced speakerphone ON.");
+                }
             }
         } catch (Exception e) {
             DiagnosticLogger.logError(TAG, "Failed to apply system AudioManager VoIP parameters.", e);
@@ -389,9 +410,16 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     private void resetAudioRouting() {
         try {
             if (audioManager != null) {
+                // Clear modern communication routing bindings for Android 12+ (API Level 31+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    audioManager.clearCommunicationDevice();
+                    DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Successfully cleared communication device mapping.");
+                } else {
+                    // Legacy fallback
+                    audioManager.setSpeakerphoneOn(false);
+                    DiagnosticLogger.logInfo(TAG, "Legacy Audio Routing: Speakerphone turned OFF.");
+                }
                 audioManager.setMode(AudioManager.MODE_NORMAL);
-                audioManager.setSpeakerphoneOn(false);
-                DiagnosticLogger.logInfo(TAG, "System AudioManager successfully reset to MODE_NORMAL.");
             }
         } catch (Exception e) {
             DiagnosticLogger.logError(TAG, "Failed to reset system AudioManager audio routing parameters.", e);
