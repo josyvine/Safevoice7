@@ -55,6 +55,9 @@ public class VoiceRecognitionService extends Service {
     private static final String CHANNEL_ID = "VoiceRecognitionChannel";
     private static final int NOTIFICATION_ID = 1;
 
+    // FIX FOR GLITCH 4: Broadcast action to notify the UI when service running state changes
+    public static final String ACTION_SERVICE_STATUS_CHANGED = "com.safevoice.app.ACTION_SERVICE_STATUS_CHANGED";
+
     private SpeechRecognizer speechRecognizer;
     private Intent speechRecognizerIntent;
 
@@ -75,6 +78,7 @@ public class VoiceRecognitionService extends Service {
         super.onCreate();
         isServiceRunning = true;
         instance = this;
+        sendStatusBroadcast(); // FIX FOR GLITCH 4: Broadcast live running status state to HomeFragment
         DiagnosticLogger.logInfo(TAG, "Service onCreate() invoked. Continuous listening loop starting.");
 
         try {
@@ -334,6 +338,7 @@ public class VoiceRecognitionService extends Service {
         super.onDestroy();
         isServiceRunning = false;
         instance = null;
+        sendStatusBroadcast(); // FIX FOR GLITCH 4: Broadcast updated stopped state to update UI elements
         DiagnosticLogger.logInfo(TAG, "Service onDestroy() invoked. Stopping all background listening routines.");
         
         // Remove the real-time database listener to prevent memory leaks on destroy
@@ -407,6 +412,17 @@ public class VoiceRecognitionService extends Service {
                 .build();
     }
 
+    // FIX FOR GLITCH 4: Broadcast helper method to dispatch service state updates
+    private void sendStatusBroadcast() {
+        try {
+            Intent intent = new Intent(ACTION_SERVICE_STATUS_CHANGED);
+            sendBroadcast(intent);
+            Log.d(TAG, "Service running status broadcast dispatched successfully.");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to dispatch service status broadcast.", e);
+        }
+    }
+
     /**
      * The core RecognitionListener that handles speech-to-text results and errors.
      */
@@ -426,8 +442,10 @@ public class VoiceRecognitionService extends Service {
                         Intent emergencyIntent = new Intent(VoiceRecognitionService.this, EmergencyHandlerService.class);
                         startService(emergencyIntent);
 
-                        // Stop listening after a successful trigger to prevent multiple alerts [3]
-                        stopSelf();
+                        // FIX FOR GLITCH 3: Do not stop the entire service context (remove stopSelf()).
+                        // Call pauseListening() to suspend continuous recording and release the hardware microphone,
+                        // allowing the caller activity to cleanly resume the loop later.
+                        pauseListening();
                         return; // Exit the loop and method
                     }
                 }
