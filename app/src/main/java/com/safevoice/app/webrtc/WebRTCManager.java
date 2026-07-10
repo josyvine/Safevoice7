@@ -1,8 +1,8 @@
 package com.safevoice.app.webrtc;
 
 import android.content.Context;
-import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
 import android.os.Build;
 import android.os.Looper;
 import android.util.Log;
@@ -378,13 +378,12 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
         try {
             if (audioManager != null) {
                 audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                audioManager.setMicrophoneMute(false);
-
-                // Use the updated communication device API for Android 12+ (API Level 31+)
+                
+                // FIX FOR GLITCH 1: Correctly route audio output using setCommunicationDevice on API 31+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    List<AudioDeviceInfo> availableDevices = audioManager.getAvailableCommunicationDevices();
+                    List<AudioDeviceInfo> devices = audioManager.getAvailableCommunicationDevices();
                     AudioDeviceInfo speakerDevice = null;
-                    for (AudioDeviceInfo device : availableDevices) {
+                    for (AudioDeviceInfo device : devices) {
                         if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
                             speakerDevice = device;
                             break;
@@ -392,15 +391,17 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
                     }
                     if (speakerDevice != null) {
                         boolean result = audioManager.setCommunicationDevice(speakerDevice);
-                        DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Forced communication to built-in speaker. Result: " + result);
+                        DiagnosticLogger.logInfo(TAG, "Android 12+ audio routed to built-in speaker. Success: " + result);
                     } else {
-                        DiagnosticLogger.logWarn(TAG, "Android 12+ Audio Routing: Built-in speaker device not found.");
+                        DiagnosticLogger.logWarn(TAG, "Android 12+ built-in speaker device was not found.");
+                        audioManager.setSpeakerphoneOn(true); // Fallback
                     }
                 } else {
-                    // Fallback configuration for pre-Android 12 platforms
                     audioManager.setSpeakerphoneOn(true);
-                    DiagnosticLogger.logInfo(TAG, "Legacy Audio Routing: forced speakerphone ON.");
                 }
+                
+                audioManager.setMicrophoneMute(false);
+                DiagnosticLogger.logInfo(TAG, "System AudioManager set to MODE_IN_COMMUNICATION. Speakerphone turned ON.");
             }
         } catch (Exception e) {
             DiagnosticLogger.logError(TAG, "Failed to apply system AudioManager VoIP parameters.", e);
@@ -410,16 +411,17 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     private void resetAudioRouting() {
         try {
             if (audioManager != null) {
-                // Clear modern communication routing bindings for Android 12+ (API Level 31+)
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+                
+                // FIX FOR GLITCH 1: Clear custom speakerphone device routing on API 31+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     audioManager.clearCommunicationDevice();
-                    DiagnosticLogger.logInfo(TAG, "Android 12+ Audio Routing: Successfully cleared communication device mapping.");
+                    DiagnosticLogger.logInfo(TAG, "Android 12+ cleared custom communication device audio routing.");
                 } else {
-                    // Legacy fallback
                     audioManager.setSpeakerphoneOn(false);
-                    DiagnosticLogger.logInfo(TAG, "Legacy Audio Routing: Speakerphone turned OFF.");
                 }
-                audioManager.setMode(AudioManager.MODE_NORMAL);
+                
+                DiagnosticLogger.logInfo(TAG, "System AudioManager successfully reset to MODE_NORMAL.");
             }
         } catch (Exception e) {
             DiagnosticLogger.logError(TAG, "Failed to reset system AudioManager audio routing parameters.", e);
