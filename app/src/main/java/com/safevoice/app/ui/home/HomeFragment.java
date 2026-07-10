@@ -1,6 +1,10 @@
 package com.safevoice.app.ui.home; 
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -33,6 +37,17 @@ public class HomeFragment extends Fragment {
     private static final String TAG = "HomeFragment";
     private FragmentHomeBinding binding;
     private FirebaseAuth mAuth;
+
+    // FIX FOR GLITCH 4: BroadcastReceiver to listen for active service running status updates dynamically
+    private final BroadcastReceiver serviceStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (VoiceRecognitionService.ACTION_SERVICE_STATUS_CHANGED.equals(intent.getAction())) {
+                Log.d(TAG, "Service status changed broadcast received. Updating button status UI.");
+                updateServiceStatusUI();
+            }
+        }
+    };
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -82,12 +97,41 @@ public class HomeFragment extends Fragment {
         });
     }
 
+    // FIX FOR GLITCH 4: Register broadcast receiver to receive dynamic service running status alerts
+    @Override
+    public void onStart() {
+        super.onStart();
+        if (getContext() != null) {
+            IntentFilter filter = new IntentFilter(VoiceRecognitionService.ACTION_SERVICE_STATUS_CHANGED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                getContext().registerReceiver(serviceStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                getContext().registerReceiver(serviceStatusReceiver, filter);
+            }
+            Log.d(TAG, "Service status BroadcastReceiver registered successfully.");
+        }
+    }
+
     @Override
     public void onResume() {
         super.onResume();
         // Update the UI every time the fragment becomes visible to ensure it's up-to-date.
         updateServiceStatusUI();
         updateVerificationStatusUI();
+    }
+
+    // FIX FOR GLITCH 4: Safely unregister broadcast receiver on fragment stop to avoid system memory leaks
+    @Override
+    public void onStop() {
+        super.onStop();
+        if (getContext() != null) {
+            try {
+                getContext().unregisterReceiver(serviceStatusReceiver);
+                Log.d(TAG, "Service status BroadcastReceiver unregistered cleanly.");
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "Receiver was not registered or failed to unregister.", e);
+            }
+        }
     }
 
     /**
