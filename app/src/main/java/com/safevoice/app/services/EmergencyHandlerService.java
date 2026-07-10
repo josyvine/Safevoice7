@@ -146,6 +146,7 @@ public class EmergencyHandlerService extends Service {
 
             if (CALL_PREF_WEBRTC.equals(callPreference) && primaryContact != null && primaryContact.getUid() != null) {
                 startWebRtcCall(primaryContact.getUid(), sessionId);
+                stopSelf(); // FIX FOR GLITCH 2: Cleanly stop this alert service task context after hand-off
             } else {
                 DiagnosticLogger.logInfo(TAG, "Making standard fallback cellular call as per settings preference.");
                 makeStandardPhoneCall(primaryContact);
