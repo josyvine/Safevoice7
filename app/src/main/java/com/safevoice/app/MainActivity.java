@@ -119,6 +119,16 @@ public class MainActivity extends AppCompatActivity {
         checkAndRequestPermissions();
     }
 
+    // FIX FOR GLITCH 1: Automatically resume background voice recognition when returning to the app (from standard call / SIM preference chooser)
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (VoiceRecognitionService.isServiceRunning) {
+            VoiceRecognitionService.resumeListening();
+            DiagnosticLogger.logInfo(TAG, "MainActivity resumed. Resuming continuous background voice listening service.");
+        }
+    }
+
     /**
      * Checks which of the required permissions are not yet granted and requests them.
      */
