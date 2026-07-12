@@ -162,6 +162,11 @@ public class HomeFragment extends Fragment {
                         .addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
                             @Override
                             public void onComplete(@NonNull Task<DocumentSnapshot> task) {
+                                // FIX: Safety null guard check to avoid crash if fragment view is destroyed
+                                if (binding == null) {
+                                    return;
+                                }
+
                                 if (task.isSuccessful() && task.getResult() != null) {
                                     DocumentSnapshot document = task.getResult();
                                     String verifiedName = document.getString("verifiedName");
