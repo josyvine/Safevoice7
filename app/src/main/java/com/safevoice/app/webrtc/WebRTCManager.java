@@ -116,6 +116,12 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
+            // FIX: Ensure peerConnectionFactory is still active before attempting to initialize PeerConnection
+            if (peerConnectionFactory == null) {
+                DiagnosticLogger.logWarn(TAG, "startCall fetchTwilioTokens callback aborted: peerConnectionFactory has been disposed.");
+                return;
+            }
+
             DiagnosticLogger.logInfo(TAG, "Twilio handshake completed. Building caller PeerConnection constraints.");
             this.peerConnection = createPeerConnection();
             if (this.peerConnection == null) {
@@ -159,6 +165,12 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
         // Fetch Twilio TURN servers asynchronously first before building the PeerConnection
         fetchTwilioTokens(() -> {
+            // FIX: Ensure peerConnectionFactory is still active before attempting to initialize PeerConnection
+            if (peerConnectionFactory == null) {
+                DiagnosticLogger.logWarn(TAG, "answerCall fetchTwilioTokens callback aborted: peerConnectionFactory has been disposed.");
+                return;
+            }
+
             DiagnosticLogger.logInfo(TAG, "Twilio handshake completed. Building callee PeerConnection constraints.");
             this.peerConnection = createPeerConnection();
             if (this.peerConnection == null) {
@@ -314,6 +326,12 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
     }
 
     private PeerConnection createPeerConnection() {
+        // FIX: If peerConnectionFactory has been disposed or cleaned up already, return null immediately
+        if (peerConnectionFactory == null) {
+            DiagnosticLogger.logWarn(TAG, "createPeerConnection aborted: peerConnectionFactory is null.");
+            return null;
+        }
+
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         // Add Google's public STUN server as default
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
@@ -430,6 +448,11 @@ public class WebRTCManager implements FirebaseSignalingClient.SignalingListener 
 
     private void createAndSetLocalAudioTrack() {
         try {
+            // FIX: Verify peerConnectionFactory is not null before using it
+            if (peerConnectionFactory == null) {
+                DiagnosticLogger.logError(TAG, "createAndSetLocalAudioTrack aborted: peerConnectionFactory is null.", null);
+                return;
+            }
             audioSource = peerConnectionFactory.createAudioSource(new MediaConstraints());
             localAudioTrack = peerConnectionFactory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
             localAudioTrack.setEnabled(true);
